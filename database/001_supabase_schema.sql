@@ -1,4 +1,4 @@
--- Grocery2U by RH v1.2.6 Supabase schema
+-- Grocery2U by RH v1.3.0 Supabase schema
 create extension if not exists pgcrypto;
 create table if not exists app_users (
   id uuid primary key default gen_random_uuid(),
@@ -109,7 +109,7 @@ group by u.id, u.username, u.full_name, u.created_at;
 
 -- Production note: restrict this view to admin users only with RLS/policies.
 
--- Grocery2U by RH v1.2.8 Admin staff + production limits
+-- Grocery2U by RH v1.3.0 Admin staff + production limits
 -- Run this section after the base schema. Review policies before public launch.
 
 create table if not exists admin_users (
@@ -117,7 +117,7 @@ create table if not exists admin_users (
   username text unique not null,
   password_hash text not null,
   full_name text,
-  role text not null default 'staff' check (role in ('super_admin','staff','support')),
+  role text not null default 'staff' check (role in ('super_admin','admin','staff','support')),
   is_active boolean not null default true,
   created_at timestamptz default now(),
   last_login_at timestamptz

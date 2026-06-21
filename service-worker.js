@@ -1,6 +1,6 @@
 /* Grocery2U by RH - Service Worker
    Purpose: force fresh app updates and remove old cache automatically. */
-const APP_VERSION = '1.2.9';
+const APP_VERSION = '1.3.0';
 const CACHE_NAME = `grocery2u-rh-${APP_VERSION}`;
 const APP_SHELL = [
   './',
