@@ -19,5 +19,5 @@ Had awal production:
 ```text
 Total family maksimum: 3,000
 Family per user maksimum: 5
-Access Code: 1 kod = 50 family secara default
+Access Code: 1 kod = 1 akaun/family access
 ```

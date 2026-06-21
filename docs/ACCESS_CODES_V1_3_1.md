@@ -1,4 +1,4 @@
-# Grocery2U v1.3.3 — Access Code / Follower Code
+# Grocery2U v1.3.1 — Access Code / Follower Code
 
 Update ini tambah modul **Access Codes** di `/admin`.
 
@@ -7,15 +7,15 @@ Update ini tambah modul **Access Codes** di `/admin`.
 Contoh:
 
 ```text
-RH-A7K9X2
-RH-M4P8L7
-RH-X9W2Q5
+RH26-A7K9
+RH26-M3P8
+RH26-X9L2
 ```
 
 Struktur:
 
 ```text
-RH = prefix rasmi
+RH26 = prefix campaign
 A7K9 = random code
 ```
 
@@ -26,7 +26,7 @@ A7K9 = random code
 3. Pergi tab **Access Codes**
 4. Isi:
    - Batch Name: `RH_FOLLOWER_001`
-   - Format: `RH-XXXXXX`
+   - Prefix: `RH26`
    - Quantity: `50`
 5. Tekan **Generate Kod**
 6. Copy / Export CSV kod untuk diberi kepada follower
