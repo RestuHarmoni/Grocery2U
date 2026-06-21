@@ -1,4 +1,4 @@
--- Grocery2U by RH v1.2.5 Supabase schema
+-- Grocery2U by RH v1.2.6 Supabase schema
 create extension if not exists pgcrypto;
 create table if not exists app_users (
   id uuid primary key default gen_random_uuid(),
@@ -91,3 +91,20 @@ on conflict (id) do nothing;
 -- Suggested path format:
 -- receipts/{family_id}/{yyyy}/{mm}/receipt_{receipt_id}.webp
 -- Store the file path in receipts.original_file_path / preview_file_path.
+
+
+-- Admin monitor view for registration dashboard
+create or replace view admin_register_monitor as
+select
+  u.id as user_id,
+  u.username,
+  u.full_name,
+  u.created_at as registered_at,
+  count(distinct f.id) as family_created_count,
+  count(distinct fm.family_id) as family_joined_count
+from app_users u
+left join families f on f.created_by = u.id
+left join family_members fm on fm.user_id = u.id
+group by u.id, u.username, u.full_name, u.created_at;
+
+-- Production note: restrict this view to admin users only with RLS/policies.
