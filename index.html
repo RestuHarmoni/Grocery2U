@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.10</title>
+  <title>Grocery2U by RH v1.3.14</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-  <link rel="manifest" href="manifest.json?v=1.3.9">
+  <link rel="manifest" href="manifest.json?v=1.3.14">
   <meta name="theme-color" content="#16a34a">
   <style>
     :root{--green:#16a34a;--green2:#22c55e;--dark:#0f172a;--muted:#64748b;--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--amber:#f59e0b;--red:#ef4444;--blue:#2563eb;}
@@ -181,6 +181,70 @@ async function supaCreateFamilyProfile(familyId,name,role){
   return {id:p.id,familyId:p.family_id,name:p.name,role:p.role,avatar:p.avatar,status:p.status||'active',createdAt:p.created_at||new Date().toISOString()};
 }
 
+async function supaLoadShoppingLists(familyId){
+  if(!sbReady() || !familyId) return;
+  const listRows=await sbFetch('/rest/v1/shopping_lists?select=id,family_id,title,created_by_user_id,created_by_profile_id,assigned_to_profile_id,status,created_at,completed_at&family_id=eq.'+encodeURIComponent(familyId)+'&order=created_at.desc',{method:'GET'});
+  const lists=(Array.isArray(listRows)?listRows:[]).map(l=>({
+    id:l.id,
+    familyId:l.family_id,
+    title:l.title,
+    createdBy:l.created_by_user_id,
+    createdByProfileId:l.created_by_profile_id,
+    assignedToProfileId:l.assigned_to_profile_id,
+    status:l.status||'draft',
+    items:[],
+    createdAt:l.created_at,
+    completedAt:l.completed_at
+  }));
+  if(lists.length){
+    const ids=lists.map(l=>l.id);
+    const itemRows=await sbFetch('/rest/v1/shopping_list_items?select=id,list_id,item_name,category_name,quantity,note,status,replacement_name,updated_at&list_id=in.('+ids.join(',')+')&order=updated_at.asc',{method:'GET'});
+    const items=Array.isArray(itemRows)?itemRows:[];
+    lists.forEach(l=>{
+      l.items=items.filter(i=>i.list_id===l.id).map(i=>({
+        id:i.id,
+        itemId:null,
+        name:i.item_name,
+        category:i.category_name,
+        unit:i.quantity||'',
+        status:i.status||'requested',
+        note:i.note||'',
+        replacement:i.replacement_name||''
+      }));
+    });
+  }
+  db.lists=(db.lists||[]).filter(l=>l.familyId!==familyId).concat(lists);
+  save();
+}
+async function supaCreateShoppingList(row){
+  const body={
+    family_id:row.familyId,
+    title:row.title,
+    created_by_user_id:row.createdBy,
+    created_by_profile_id:row.createdByProfileId,
+    assigned_to_profile_id:row.assignedToProfileId,
+    status:row.status||'draft'
+  };
+  const rows=await sbFetch('/rest/v1/shopping_lists',{method:'POST',body:JSON.stringify(body),headers:{Prefer:'return=representation'}});
+  const l=Array.isArray(rows)?rows[0]:rows;
+  if(!l||!l.id) throw new Error('Senarai tidak berjaya disimpan di Supabase.');
+  return {...row,id:l.id,createdAt:l.created_at,items:[]};
+}
+async function supaAddShoppingItem(listId,it){
+  const rows=await sbFetch('/rest/v1/shopping_list_items',{method:'POST',body:JSON.stringify({list_id:listId,item_name:it.name,category_name:it.category,quantity:it.unit,status:'requested',note:''}),headers:{Prefer:'return=representation'}});
+  const r=Array.isArray(rows)?rows[0]:rows;
+  if(!r||!r.id) throw new Error('Barang tidak berjaya disimpan di Supabase.');
+  return {id:r.id,itemId:null,name:r.item_name,category:r.category_name,unit:r.quantity||'',status:r.status||'requested',note:r.note||'',replacement:r.replacement_name||''};
+}
+async function supaUpdateShoppingItem(rowId,status,replacement){
+  await sbFetch('/rest/v1/shopping_list_items?id=eq.'+encodeURIComponent(rowId),{method:'PATCH',body:JSON.stringify({status,replacement_name:replacement||'',updated_at:new Date().toISOString()}),headers:{Prefer:'return=minimal'}});
+}
+async function supaUpdateShoppingListStatus(listId,status){
+  const body={status};
+  if(status==='completed') body.completed_at=new Date().toISOString();
+  await sbFetch('/rest/v1/shopping_lists?id=eq.'+encodeURIComponent(listId),{method:'PATCH',body:JSON.stringify(body),headers:{Prefer:'return=minimal'}});
+}
+
 function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9-]/g,'').replace(/^RH([A-Z0-9]{6})$/,'RH-$1')}
 function isValidRHCode(code){return /^RH-[A-Z0-9]{6}$/.test(normalizeAccessCode(code));}
 function getAccessData(){try{const raw=JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{codes:[]};const codes=(raw.codes||[]).filter(c=>isValidRHCode(c.code)).map(c=>({id:c.id||sid(),code:normalizeAccessCode(c.code),campaignName:c.campaignName||c.campaign_name||'RH Follower Campaign',maxFamily:Number(c.maxFamily||c.max_family||50),usedCount:Number(c.usedCount||c.used_count||0),usedUsers:Array.isArray(c.usedUsers)?c.usedUsers:[],status:c.status==='disabled'?'disabled':'active',createdAt:c.createdAt||c.created_at||new Date().toISOString()}));const data={codes};localStorage.setItem('grocery2u_access_data',JSON.stringify(data));return data}catch(e){return{codes:[]}}}
@@ -252,6 +316,7 @@ async function boot(){
     if(!profiles.length || !session.profileId || !profiles.find(p=>p.id===session.profileId)){
       appScreen.classList.add('hide'); profileScreen.classList.remove('hide'); renderProfileGate(); return;
     }
+    try{ if(sbReady()) await supaLoadShoppingLists(session.familyId); }catch(e){ console.warn('Supabase shopping list sync failed',e); }
     profileScreen.classList.add('hide'); appScreen.classList.remove('hide'); renderAll();
   }else{
     authScreen.classList.remove('hide'); profileScreen.classList.add('hide'); appScreen.classList.add('hide')
@@ -303,7 +368,7 @@ function joinFamily(){alert('Join Family telah dibuang. Satu username hanya untu
 function addItem(){const name=prompt('Nama barang?');if(!name)return;const category=prompt('Kategori?','Barang Kering')||'Lain-lain';const unit=prompt('Unit biasa?','1 unit')||'1 unit';db.items.push({id:sid(),ownerUserId:session.userId,category,name,unit,active:true});save();renderSettings()}
 function toggleItem(id){const it=db.items.find(x=>x.id===id);it.active=!it.active;save();renderSettings()}
 function editItem(id){const it=db.items.find(x=>x.id===id);it.name=prompt('Nama barang',it.name)||it.name;it.category=prompt('Kategori',it.category)||it.category;it.unit=prompt('Unit',it.unit)||it.unit;save();renderSettings()}
-function createList(){
+async function createList(){
   if(!fam())return alert('Family belum aktif');
   if(!profile())return switchProfile();
   const profiles=familyProfiles().filter(p=>p.id!==session.profileId);
@@ -314,13 +379,50 @@ function createList(){
   const choice=prompt(listText,'1');
   const idx=Math.max(0,Number(choice||1)-1);
   const buyer=profiles[idx]||profiles[0];
-  db.lists.push({id:sid(),familyId:fam().id,title,createdBy:session.userId,createdByProfileId:session.profileId,assignedToProfileId:buyer.id,status:'draft',items:[],createdAt:new Date().toISOString()});
+  let row={id:sid(),familyId:fam().id,title,createdBy:session.userId,createdByProfileId:session.profileId,assignedToProfileId:buyer.id,status:'draft',items:[],createdAt:new Date().toISOString()};
+  if(sbReady()){
+    try{ row=await supaCreateShoppingList(row); }
+    catch(e){ alert('Gagal simpan senarai ke Supabase: '+e.message); return; }
+  }
+  db.lists.push(row);
   save();renderLists();renderHome();
 }
-function addToList(listId,itemId){const l=db.lists.find(x=>x.id===listId);const it=db.items.find(x=>x.id===itemId);l.items.push({id:sid(),itemId:it.id,name:it.name,category:it.category,unit:it.unit,status:'requested',note:'',replacement:''});save();renderLists()}
-function setStatus(listId,rowId,status){const row=db.lists.find(x=>x.id===listId).items.find(i=>i.id===rowId);row.status=status;if(status==='replaced')row.replacement=prompt('Ganti dengan barang apa?',row.replacement||'')||'';save();renderLists();renderHome()}
-function sendList(id){const l=db.lists.find(x=>x.id===id);l.status='sent';save();renderLists();renderHome()}
-function completeList(id){const l=db.lists.find(x=>x.id===id);l.status='completed';save();renderLists();renderHome()}
+async function addToList(listId,itemId){
+  const l=db.lists.find(x=>x.id===listId);const it=db.items.find(x=>x.id===itemId); if(!l||!it)return;
+  let row={id:sid(),itemId:it.id,name:it.name,category:it.category,unit:it.unit,status:'requested',note:'',replacement:''};
+  if(sbReady()){
+    try{ row=await supaAddShoppingItem(listId,it); }
+    catch(e){ alert('Gagal simpan barang ke Supabase: '+e.message); return; }
+  }
+  l.items.push(row);save();renderLists();renderHome();
+}
+async function setStatus(listId,rowId,status){
+  const list=db.lists.find(x=>x.id===listId); if(!list)return;
+  const row=list.items.find(i=>i.id===rowId); if(!row)return;
+  let replacement=row.replacement||'';
+  if(status==='replaced') replacement=prompt('Ganti dengan barang apa?',replacement)||'';
+  if(sbReady()){
+    try{ await supaUpdateShoppingItem(rowId,status,replacement); }
+    catch(e){ alert('Gagal update status di Supabase: '+e.message); return; }
+  }
+  row.status=status; row.replacement=replacement; save();renderLists();renderHome();
+}
+async function sendList(id){
+  const l=db.lists.find(x=>x.id===id); if(!l)return;
+  if(sbReady()){
+    try{ await supaUpdateShoppingListStatus(id,'sent'); }
+    catch(e){ alert('Gagal hantar senarai ke Supabase: '+e.message); return; }
+  }
+  l.status='sent';save();renderLists();renderHome();
+}
+async function completeList(id){
+  const l=db.lists.find(x=>x.id===id); if(!l)return;
+  if(sbReady()){
+    try{ await supaUpdateShoppingListStatus(id,'completed'); }
+    catch(e){ alert('Gagal lengkapkan senarai di Supabase: '+e.message); return; }
+  }
+  l.status='completed';l.completedAt=new Date().toISOString();save();renderLists();renderHome();
+}
 function uploadReceipt(){
   if(!fam())return alert('Pilih family dahulu');
   const input=document.createElement('input');
@@ -463,9 +565,12 @@ function openSettingsItems(){const btn=[...document.querySelectorAll('.tab')].fi
 function renderLists(){
   const currentProfile=profile();
   const familyLists=db.lists.filter(l=>l.familyId===session.familyId&&(!currentProfile||l.createdByProfileId===currentProfile.id||l.assignedToProfileId===currentProfile.id));
+  const assignedToMe=familyLists.filter(l=>l.assignedToProfileId===currentProfile?.id&&l.status!=='completed');
+  const sentByMe=familyLists.filter(l=>l.createdByProfileId===currentProfile?.id);
   const activeItems=db.items.filter(i=>i.ownerUserId===session.userId&&i.active);
   const nameOf=id=>db.profiles.find(p=>p.id===id)?.name||'-';
-  lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button><p class="muted">Profil aktif: <b>${currentProfile?.name||'-'}</b>. Senarai boleh dihantar kepada Ayah, Ibu atau Anak.</p>${familyLists.map(l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Daripada: <b>${nameOf(l.createdByProfileId)}</b> → Kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':'amber'}">${l.status}</span></div><div><button class="btn small blue" onclick="sendList('${l.id}')">Hantar</button> <button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><div class="category">Barang diminta</div>${l.items.map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}${r.replacement?' → '+r.replacement:''}</p><div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`).join('')||'<div class="card"><p class="muted">Belum ada senarai untuk profil ini.</p></div>'}`
+  const cardHtml=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Daripada: <b>${nameOf(l.createdByProfileId)}</b> → Kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${l.status}</span></div><div>${l.createdByProfileId===currentProfile?.id?`<button class="btn small blue" onclick="sendList('${l.id}')">Hantar</button> `:''}<button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}${r.replacement?' → '+r.replacement:''}</p><div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
+  lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button><p class="muted">Profil aktif: <b>${currentProfile?.name||'-'}</b>. Senarai boleh dihantar kepada Ayah, Ibu atau Anak.</p><div class="category">Untuk Saya</div>${assignedToMe.map(cardHtml).join('')||'<div class="card"><p class="muted">Belum ada senarai diterima untuk profil ini.</p></div>'}<div class="category">Saya Hantar / Saya Buat</div>${sentByMe.map(cardHtml).join('')||'<div class="card"><p class="muted">Belum ada senarai dihantar oleh profil ini.</p></div>'}`
 }
 function renderReceipts(){
   const rec=db.receipts.filter(r=>r.familyId===session.familyId).sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -483,7 +588,7 @@ function renderReceipts(){
 boot();
 </script>
 <script>
-  const APP_VERSION = '1.3.1';
+  const APP_VERSION = '1.3.14';
   async function registerGrocery2UServiceWorker(){
     if(!('serviceWorker' in navigator)) return;
     try{

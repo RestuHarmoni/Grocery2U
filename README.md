@@ -1,8 +1,6 @@
-# Grocery2U by RH v1.3.13
+# Grocery2U by RH v1.3.14
 
-Patch: Family Profile Supabase Persist Fix.
+Patch: Assigned List Receiver Fix.
 
-Run SQL terbaru:
-- `database/009_family_profile_persist_fix.sql`
-
-Selepas run SQL, profile keluarga tidak lagi hilang selepas clear browser kerana app akan load dari Supabase table `family_profiles`.
+Run SQL:
+- database/010_shopping_lists_profile_assign_fix.sql
