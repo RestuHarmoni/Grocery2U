@@ -25,3 +25,12 @@ Access Code: 1 kod = 50 family secara default
 
 ## v1.3.8 Password Recovery
 Run: `database/005_password_recovery.sql`
+
+
+## v1.3.9 Family Profile Gate
+
+Run:
+
+```text
+database/006_family_profiles_v1_3_9.sql
+```

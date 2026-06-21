@@ -1,6 +1,6 @@
 {
-  "version": "1.3.8",
+  "version": "1.3.9",
   "name": "Grocery2U by RH",
-  "notes": "Supabase integration fix for admin access codes, user register records and admin dashboard data source.",
-  "release": "v1.3.8 Password Recovery"
+  "notes": "Family account with Netflix-style profile gate. One username equals one family, max 5 profiles, and lists can be assigned between profiles.",
+  "release": "v1.3.9 Family Profile Gate"
 }
