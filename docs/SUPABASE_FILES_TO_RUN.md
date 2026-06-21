@@ -1,15 +1,23 @@
-# Supabase Files To Run
+# Supabase Files To Run — Grocery2U by RH
 
-Untuk versi ini, run fail berikut sahaja di Supabase SQL Editor:
+Run ikut turutan ini dalam Supabase SQL Editor:
 
-1. `database/001_supabase_schema.sql`
+```text
+database/001_supabase_schema.sql
+database/002_admin_username_password.sql
+database/003_access_codes.sql
+```
 
-Jangan upload fail berikut ke Supabase:
-- `index.html`
-- `admin/index.html`
-- `manifest.json`
-- `sw.js`
-- `service-worker.js`
-- `assets/`
+Bucket yang diperlukan:
 
-Fail ini untuk hosting Cloudflare/GitHub, bukan Supabase.
+```text
+receipts
+```
+
+Had awal production:
+
+```text
+Total family maksimum: 3,000
+Family per user maksimum: 5
+Access Code: 1 kod = 1 akaun/family access
+```

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Grocery2U Admin Staff v1.3.0</title>
+  <title>Grocery2U Admin Staff v1.3.1</title>
   <link rel="icon" href="../favicon.ico">
   <style>
     :root{--green:#16a34a;--green2:#22c55e;--dark:#0f172a;--muted:#64748b;--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--red:#ef4444;--amber:#f59e0b;--blue:#2563eb}
@@ -50,6 +50,7 @@
       <button class="btn small ghost active" onclick="setTab('users',this)">User</button>
       <button class="btn small ghost" onclick="setTab('families',this)">Family</button>
       <button class="btn small ghost" onclick="setTab('activity',this)">Aktiviti</button>
+      <button class="btn small ghost" onclick="setTab('codes',this)">Access Codes</button>
       <button class="btn small ghost" onclick="setTab('supa',this)">Supabase</button>
     </div>
     <div id="tabContent" class="card"></div>
@@ -73,8 +74,41 @@ function adminLogout(){localStorage.removeItem('grocery2u_admin_session');locati
 function boot(){if(localStorage.getItem('grocery2u_admin_session')){loginScreen.classList.add('hide');adminApp.classList.remove('hide');renderAdmin()}else{loginScreen.classList.remove('hide');adminApp.classList.add('hide')}}
 function fmtRM(n){return 'RM'+Number(n||0).toFixed(0)}
 function fmtDate(d){return new Date(d||Date.now()).toLocaleDateString('ms-MY')}
+
+function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/^([A-Z0-9]{4})([A-Z0-9]{4})$/,'$1-$2')}
+function getAccessData(){try{return JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{batches:[],codes:[]}}catch(e){return{batches:[],codes:[]}}}
+function saveAccessData(data){localStorage.setItem('grocery2u_access_data',JSON.stringify(data));}
+function randomCodePart(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<4;i++)s+=chars[Math.floor(Math.random()*chars.length)];return s;}
+function generateAccessCodes(){const batchName=(document.getElementById('batchName')?.value||'RH_FOLLOWER_001').trim();const prefix=(document.getElementById('codePrefix')?.value||('RH'+String(new Date().getFullYear()).slice(2))).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4)||'RH26';let qty=parseInt(document.getElementById('codeQty')?.value||'50',10);qty=Math.max(1,Math.min(1000,qty));const data=getAccessData();const batchId='b_'+Math.random().toString(36).slice(2,10);const existing=new Set(data.codes.map(c=>c.code));const codes=[];while(codes.length<qty){const c=`${prefix}-${randomCodePart()}`;if(!existing.has(c)){existing.add(c);codes.push(c)}}data.batches.unshift({id:batchId,batchName,prefix,quantity:qty,createdAt:new Date().toISOString(),createdBy:'superadmin'});codes.forEach(code=>data.codes.unshift({id:'c_'+Math.random().toString(36).slice(2,10),batchId,code,status:'available',usedBy:null,usedAt:null,createdAt:new Date().toISOString()}));saveAccessData(data);setTab('codes');alert(qty+' kod berjaya dijana.');}
+function copyAvailableCodes(){const data=getAccessData();const codes=data.codes.filter(c=>c.status!=='used').map(c=>c.code).join('\n');if(navigator.clipboard)navigator.clipboard.writeText(codes);alert('Kod available disalin.');}
+function exportCodesCSV(){const data=getAccessData();const rows=['code,status,batch,used_by,used_at,created_at',...data.codes.map(c=>{const b=data.batches.find(x=>x.id===c.batchId);return [c.code,c.status,b?.batchName||'',c.usedBy||'',c.usedAt||'',c.createdAt||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')})];const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'}));a.download='grocery2u_access_codes.csv';a.click();URL.revokeObjectURL(a.href)}
+
 function renderAdmin(){const db=loadDB();const users=db.users||[];const families=db.families||[];const receipts=db.receipts||[];const lists=db.lists||[];const pending=receipts.filter(r=>r.claimStatus==='unpaid').reduce((s,r)=>s+Number(r.amount||0),0);kUsers.textContent=users.length;kFamilies.textContent=families.length;kReceipts.textContent=receipts.length;kClaims.textContent=fmtRM(pending);const pct=Math.min(100,Math.round(families.length/LIMIT_FAMILIES*100));familyPct.textContent=pct+'%';familyBar.style.width=pct+'%';const days=[...Array(7)].map((_,i)=>{const d=new Date(Date.now()-(6-i)*86400000);const key=d.toDateString();const count=users.filter(u=>new Date(u.createdAt||Date.now()).toDateString()===key).length;return{label:d.toLocaleDateString('ms-MY',{weekday:'short'}),count}});const max=Math.max(1,...days.map(d=>d.count));chartBars.innerHTML=days.map(d=>`<i style="height:${Math.max(10,Math.round(d.count/max*110))}px" title="${d.count} register"></i>`).join('');chartLabels.innerHTML=days.map(d=>`<span>${d.label}<br><b>${d.count}</b></span>`).join('');setTab(localStorage.getItem('grocery2u_admin_tab')||'users')}
-function setTab(tab,btn){localStorage.setItem('grocery2u_admin_tab',tab);document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');else{const b=[...document.querySelectorAll('.tabs button')].find(x=>x.textContent.toLowerCase().includes(tab));if(b)b.classList.add('active')}const db=loadDB();const users=db.users||[],families=db.families||[],receipts=db.receipts||[],lists=db.lists||[];if(tab==='users')tabContent.innerHTML='<h3>User Terbaru</h3><div class="table">'+(users.map(u=>{const f=families.filter(x=>x.createdBy===u.id).length;return `<div class="row"><div><h4>${u.username}</h4><p class="muted">${u.fullName||'-'} • ${fmtDate(u.createdAt)}</p></div><span class="pill ${f>=5?'danger':f>=4?'warn':''}">${f}/5 family</span></div>`}).join('')||'<p class="muted">Belum ada user.</p>')+'</div>';if(tab==='families')tabContent.innerHTML='<h3>Family Terbaru</h3><div class="table">'+(families.map(f=>{const owner=users.find(u=>u.id===f.createdBy);return `<div class="row"><div><h4>${f.name||f.family_name}</h4><p class="muted">Owner: ${owner?.username||'-'} • ${fmtDate(f.createdAt)}</p></div><span class="pill">active</span></div>`}).join('')||'<p class="muted">Belum ada family.</p>')+'</div>';if(tab==='activity')tabContent.innerHTML='<h3>Aktiviti Senarai</h3><div class="table">'+(lists.map(l=>`<div class="row"><div style="flex:1"><h4>${l.title}</h4><p class="muted">Status: ${l.status}</p><div class="bar"><span style="width:${l.progress||0}%"></span></div></div><span class="pill">${l.progress||0}%</span></div>`).join('')||'<p class="muted">Belum ada aktiviti.</p>')+'</div>';if(tab==='supa')tabContent.innerHTML=`<h3>Supabase Yang Perlu Ada</h3><div class="notice">Run fail <b>database/001_supabase_schema.sql</b> dan <b>database/002_admin_username_password.sql</b> versi v1.3.0.</div><ul class="muted"><li>Table <b>admin_users</b> untuk login staf.</li><li>Table <b>admin_sessions</b> untuk rekod session.</li><li>Trigger had maksimum <b>3,000 family</b>.</li><li>Trigger maksimum <b>5 family per user</b>.</li><li>View <b>admin_register_monitor</b>.</li><li>Bucket <b>receipts</b> untuk upload/download resit.</li></ul>`}
+function setTab(tab,btn){localStorage.setItem('grocery2u_admin_tab',tab);document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('active'));if(btn)btn.classList.add('active');else{const b=[...document.querySelectorAll('.tabs button')].find(x=>x.textContent.toLowerCase().includes(tab));if(b)b.classList.add('active')}const db=loadDB();const users=db.users||[],families=db.families||[],receipts=db.receipts||[],lists=db.lists||[];if(tab==='users')tabContent.innerHTML='<h3>User Terbaru</h3><div class="table">'+(users.map(u=>{const f=families.filter(x=>x.createdBy===u.id).length;return `<div class="row"><div><h4>${u.username}</h4><p class="muted">${u.fullName||'-'} • ${fmtDate(u.createdAt)}</p></div><span class="pill ${f>=5?'danger':f>=4?'warn':''}">${f}/5 family</span></div>`}).join('')||'<p class="muted">Belum ada user.</p>')+'</div>';if(tab==='families')tabContent.innerHTML='<h3>Family Terbaru</h3><div class="table">'+(families.map(f=>{const owner=users.find(u=>u.id===f.createdBy);return `<div class="row"><div><h4>${f.name||f.family_name}</h4><p class="muted">Owner: ${owner?.username||'-'} • ${fmtDate(f.createdAt)}</p></div><span class="pill">active</span></div>`}).join('')||'<p class="muted">Belum ada family.</p>')+'</div>';if(tab==='activity')tabContent.innerHTML='<h3>Aktiviti Senarai</h3><div class="table">'+(lists.map(l=>`<div class="row"><div style="flex:1"><h4>${l.title}</h4><p class="muted">Status: ${l.status}</p><div class="bar"><span style="width:${l.progress||0}%"></span></div></div><span class="pill">${l.progress||0}%</span></div>`).join('')||'<p class="muted">Belum ada aktiviti.</p>')+'</div>';
+if(tab==='codes'){
+  const data=getAccessData();
+  const total=data.codes.length;
+  const used=data.codes.filter(c=>c.status==='used').length;
+  const available=total-used;
+  const pct=total?Math.round(used/total*100):0;
+  tabContent.innerHTML=`<h3>Access Codes</h3>
+  <div class="notice">Format rasmi: <b>RH26-A7K9</b>. 1 kod = 1 akaun/family access. Generate kod di admin, kemudian beri kepada follower.</div>
+  <div class="grid" style="grid-template-columns:repeat(4,1fr);margin-top:12px">
+    <div class="kpi"><b>${total}</b><span>Kod dijana</span></div>
+    <div class="kpi"><b>${used}</b><span>Diguna</span></div>
+    <div class="kpi"><b>${available}</b><span>Baki</span></div>
+    <div class="kpi"><b>${pct}%</b><span>Conversion</span></div>
+  </div>
+  <div class="card" style="box-shadow:none">
+    <h4>Generate Batch Kod</h4>
+    <input id="batchName" class="input" placeholder="Batch Name contoh: RH_FOLLOWER_001" value="RH_FOLLOWER_001">
+    <div class="row" style="margin-top:8px"><input id="codePrefix" class="input" placeholder="Prefix" value="RH${String(new Date().getFullYear()).slice(2)}"><input id="codeQty" class="input" type="number" min="1" max="1000" value="50"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" onclick="generateAccessCodes()">Generate Kod</button><button class="btn ghost" onclick="copyAvailableCodes()">Copy Available</button><button class="btn ghost" onclick="exportCodesCSV()">Export CSV</button></div>
+  </div>
+  <h4>Senarai Kod Terbaru</h4>
+  <div class="table">${data.codes.slice(0,80).map(c=>{const b=data.batches.find(x=>x.id===c.batchId);return `<div class="row"><div><h4>${c.code}</h4><p class="muted">${b?.batchName||'-'} • ${fmtDate(c.createdAt)}</p></div><div style="text-align:right"><span class="pill ${c.status==='used'?'warn':'green'}">${c.status==='used'?'Used':'Available'}</span><p class="muted">${c.usedBy?('User: '+c.usedBy):'Belum digunakan'}</p></div></div>`}).join('')||'<p class="muted">Belum ada kod. Generate batch pertama 50 kod.</p>'}</div>`;
+}
+if(tab==='supa')tabContent.innerHTML=`<h3>Supabase Yang Perlu Ada</h3><div class="notice">Run fail <b>database/001_supabase_schema.sql</b>, <b>database/002_admin_username_password.sql</b> dan <b>database/003_access_codes.sql</b> versi v1.3.1.</div><ul class="muted"><li>Table <b>admin_users</b> untuk login staf.</li><li>Table <b>admin_sessions</b> untuk rekod session.</li><li>Table <b>access_code_batches</b> dan <b>access_codes</b> untuk kod follower.</li><li>Trigger had maksimum <b>3,000 family</b>.</li><li>Trigger maksimum <b>5 family per user</b>.</li><li>View <b>admin_register_monitor</b>.</li><li>Bucket <b>receipts</b> untuk upload/download resit.</li></ul>`}
 function exportCSV(){const db=loadDB();const rows=['type,name,status',...((db.users||[]).map(u=>`user,${u.username},active`)),...((db.families||[]).map(f=>`family,${f.name||f.family_name},active`))];const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'}));a.download='grocery2u_admin_export.csv';a.click();URL.revokeObjectURL(a.href)}
 boot();
 </script>
