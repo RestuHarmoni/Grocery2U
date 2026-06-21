@@ -26,6 +26,33 @@
     .filter-row{display:flex;gap:7px;overflow:auto;padding:2px 0 8px}.filter-chip{border:1px solid var(--line);background:#f8fafc;color:var(--dark);border-radius:999px;padding:8px 10px;font-weight:900;font-size:12px;white-space:nowrap}.filter-chip.active{background:#dcfce7;color:#166534;border-color:#86efac}.cat-accordion{border:1px solid var(--line);border-radius:18px;margin:10px 0;overflow:hidden;background:rgba(255,255,255,.92);backdrop-filter:blur(8px)}.cat-head{width:100%;border:0;background:rgba(255,255,255,.88);padding:15px;display:flex;align-items:center;justify-content:space-between;text-align:left;font-weight:950;color:var(--dark);cursor:pointer}.cat-head small{color:var(--muted);font-weight:800}.cat-body{display:none;border-top:1px solid var(--line);padding:4px 14px;background:#fbfdff}.cat-accordion.open .cat-body{display:block}.cat-accordion.open .chev{transform:rotate(90deg)}.chev{display:inline-block;transition:.2s}.item-compact{cursor:pointer}.item-actions{display:none;margin-top:10px;gap:6px;flex-wrap:wrap}.item-compact.open .item-actions{display:flex}.fab{position:sticky;bottom:76px;margin-left:auto;display:grid;place-items:center;width:54px;height:54px;border-radius:50%;box-shadow:0 12px 25px rgba(22,163,74,.28);font-size:24px;z-index:5}.empty-state{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:18px;padding:16px;text-align:center;color:var(--muted);font-size:13px}
   
     .page-bg-note{font-size:11px;color:#64748b;text-align:center;margin-top:8px}
+
+/* v1.3.16 Animated live progress */
+@keyframes g2uPulseGlow{0%,100%{box-shadow:0 12px 26px rgba(22,163,74,.18), inset 0 0 0 rgba(255,255,255,0)}50%{box-shadow:0 18px 42px rgba(34,197,94,.38), inset 0 0 28px rgba(255,255,255,.08)}}
+@keyframes g2uShimmer{0%{transform:translateX(-100%)}100%{transform:translateX(230%)}}
+@keyframes g2uRingSpin{0%{filter:drop-shadow(0 0 0 rgba(134,239,172,0));transform:rotate(0deg)}50%{filter:drop-shadow(0 0 14px rgba(134,239,172,.55));transform:rotate(180deg)}100%{filter:drop-shadow(0 0 0 rgba(134,239,172,0));transform:rotate(360deg)}}
+@keyframes g2uFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes g2uSpark{0%{left:0;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:calc(100% - 18px);opacity:0}}
+@keyframes g2uConfetti{0%{opacity:0;transform:scale(.9) rotate(0deg)}30%{opacity:1}100%{opacity:0;transform:scale(1.08) rotate(8deg)}}
+.live-progress-card{position:relative;overflow:hidden;transition:.35s ease;}
+.live-progress-card.live-animated{animation:g2uPulseGlow 2.6s ease-in-out infinite;}
+.live-progress-card.live-animated:before{content:"";position:absolute;inset:0;background:linear-gradient(115deg,transparent 0%,rgba(255,255,255,.12) 38%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.10) 62%,transparent 100%);transform:translateX(-100%);animation:g2uShimmer 3.4s ease-in-out infinite;pointer-events:none;}
+.live-progress-card.is-complete{background:linear-gradient(135deg,#047857,#22c55e);animation:g2uPulseGlow 1.7s ease-in-out infinite;}
+.live-progress-card.is-complete:after{content:"🎉 ✦ ✨";position:absolute;right:18px;top:12px;font-size:20px;animation:g2uConfetti 2.2s ease-in-out infinite;}
+.live-stage{position:relative;}
+.live-stage span{transition:width .65s cubic-bezier(.2,.8,.2,1);position:relative;overflow:visible;}
+.live-stage span:after{content:"";position:absolute;right:-5px;top:50%;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 15px rgba(255,255,255,.95),0 0 22px rgba(134,239,172,.9);transform:translateY(-50%);opacity:.95;}
+.live-progress-card.live-animated .live-stage span:before{content:"";position:absolute;top:0;bottom:0;width:26px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);animation:g2uSpark 2.1s ease-in-out infinite;}
+.progress-ring{position:relative;transition:background .65s ease;}
+.live-progress-card.live-animated .progress-ring{animation:g2uRingSpin 5.2s linear infinite;}
+.progress-ring b{animation:g2uFloat 2s ease-in-out infinite;}
+.live-status-line{display:flex;align-items:center;gap:7px;margin-top:4px;color:rgba(255,255,255,.86);font-size:12px;font-weight:800;}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#86efac;box-shadow:0 0 10px #86efac;display:inline-block;}
+.live-progress-card.is-complete .progress-ring:before{background:#065f46;}
+.live-progress-card.is-complete .progress-ring b{font-size:0;}
+.live-progress-card.is-complete .progress-ring b:after{content:"✓";font-size:38px;}
+.progress span{transition:width .65s cubic-bezier(.2,.8,.2,1);}
+
 </style>
 </head>
 <body>
@@ -433,6 +460,10 @@ async function setStatus(listId,rowId,status){
     catch(e){ alert('Gagal update status di Supabase: '+e.message); return; }
   }
   row.status=status;
+  if(['sent','accepted'].includes(list.status)){
+    if(sbReady()){ try{ await supaUpdateShoppingListStatus(list.id,'shopping'); }catch(e){ console.warn('Gagal auto update shopping status',e); } }
+    list.status='shopping';
+  }
   if(status==='replaced'){ row.replacement=extra.replacement; row.replacementNote=extra.replacementNote; }
   if(status==='unavailable'){ row.unavailableReason=extra.unavailableReason; row.unavailableNote=extra.unavailableNote; }
   save();renderLists();renderHome();
@@ -500,6 +531,9 @@ const weeklyReceipts=db.receipts.filter(r=>r.familyId===session.familyId&&new Da
 const weeklyTotal=weeklyReceipts.reduce((s,r)=>s+r.amount,0);
 const totalClaim=db.receipts.filter(r=>r.familyId===session.familyId&&r.claimStatus==='unpaid').reduce((s,r)=>s+r.amount,0);
 const pct=total?Math.round((bought/total)*100):0;
+const liveClass=current?((pct>=100?'is-complete ':(['accepted','shopping','sent'].includes(current.status)?'live-animated ':''))):'';
+const liveBadge=current?(pct>=100?'completed':(current.status==='sent'?'sent':current.status)):'Kosong';
+const liveLine=current?(pct>=100?'Selesai 100%':(current.status==='accepted'?'Tugasan diterima — bersedia membeli':(current.status==='shopping'?'Sedang membeli — progress live':'Menunggu diterima'))):'Tiada tugasan aktif';
 const fDate=d=>d.toLocaleDateString('ms-MY',{day:'numeric',month:'short'});
 home.innerHTML=`
 <div class="home-hero">
@@ -511,13 +545,13 @@ home.innerHTML=`
   </div>
 </div>
 <div class="between" style="margin:2px 0 8px"><h3 style="margin:0">Senarai Aktif</h3><span class="mini">Lihat semua ›</span></div>
-<div class="card live-progress-card">
+<div class="card live-progress-card ${liveClass}">
   <div class="between">
     <div style="flex:1">
-      <div class="between"><h3 class="list-title">${current?current.title:'Belum ada senarai aktif'}</h3><span class="pill green">${current?(current.status==='sent'?'Live buying':current.status):'Kosong'}</span></div>
+      <div class="between"><h3 class="list-title">${current?current.title:'Belum ada senarai aktif'}</h3><span class="pill green">${liveBadge}</span></div>
       <p class="muted">${current?'Daripada '+(db.profiles.find(p=>p.id===current.createdByProfileId)?.name||'-')+' kepada '+(db.profiles.find(p=>p.id===current.assignedToProfileId)?.name||'-'):'Tekan + Buat Senarai untuk mula.'}</p>
       <div class="live-stage"><span style="width:${pct}%"></span></div>
-      <p class="muted">Live progress: ${bought} / ${total} barang selesai</p>
+      <div class="live-status-line"><span class="live-dot"></span>${liveLine}</div><p class="muted">Live progress: ${bought} / ${total} barang selesai</p>
     </div>
     <div class="progress-ring-wrap"><div class="progress-ring" style="--p:${pct}%"><b>${pct}%</b></div></div>
   </div>
@@ -614,7 +648,7 @@ function renderLists(){
   };
   const receiverCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">${nameOf(l.createdByProfileId)} minta anda beli</p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><div>${l.status==='sent'?`<button class="btn small blue" onclick="acceptTask('${l.id}')">Terima</button>`:''}<button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">Progress: ${progress(l)}% • ${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}<div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
   const senderCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Dihantar kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p>${l.status==='draft'?`<div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><button class="btn small blue" style="margin-top:10px" onclick="sendList('${l.id}')">Hantar</button>`:''}<div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}</div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
-  const progressCard=l=>`<div class="card"><div class="between"><div><b>${l.title}</b><p class="muted">${nameOf(l.createdByProfileId)} → ${nameOf(l.assignedToProfileId)}</p></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div></div>`;
+  const progressCard=l=>`<div class="card ${progress(l)>=100?'is-complete':'live-animated'}"><div class="between"><div><b>${l.title}</b><p class="muted">${nameOf(l.createdByProfileId)} → ${nameOf(l.assignedToProfileId)}</p></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div></div>`;
   const activityLine=l=>`<div class="activity-line"><span>${nameOf(l.createdByProfileId)} hantar senarai kepada ${nameOf(l.assignedToProfileId)}: <b>${l.title}</b></span><span>${statusLabel[l.status]||l.status}</span></div>`;
   lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button><p class="muted">Profil aktif: <b>${currentProfile?.name||'-'}</b>. Ruang tugasan hanya papar senarai yang berkaitan dengan profil ini.</p>
   <div class="category">📥 Tugasan Untuk Saya</div>${assignedToMe.map(receiverCard).join('')||'<div class="card"><p class="muted">Tiada tugasan untuk anda.</p></div>'}
@@ -646,7 +680,7 @@ function renderReceipts(){
 boot();
 </script>
 <script>
-  const APP_VERSION = '1.3.15';
+  const APP_VERSION = '1.3.16';
   async function registerGrocery2UServiceWorker(){
     if(!('serviceWorker' in navigator)) return;
     try{
