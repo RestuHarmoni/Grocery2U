@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.6</title>
+  <title>Grocery2U by RH v1.3.8</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-  <link rel="manifest" href="manifest.json?v=1.3.6">
+  <link rel="manifest" href="manifest.json?v=1.3.8">
   <meta name="theme-color" content="#16a34a">
   <style>
     :root{--green:#16a34a;--green2:#22c55e;--dark:#0f172a;--muted:#64748b;--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--amber:#f59e0b;--red:#ef4444;--blue:#2563eb;}
@@ -38,14 +38,14 @@
       <h3 style="margin-top:0">Login Username</h3>
       <input id="loginUsername" class="input" placeholder="Username contoh: shuq" />
       <div style="height:10px"></div>
-      <input id="loginPin" class="input" placeholder="PIN" type="password" />
+      <input id="loginPin" class="input" placeholder="Password" type="password" />
       <div style="height:10px"></div>
       <input id="accessCode" class="input" placeholder="Access Code contoh: RH-A7K9X2" />
       <div style="height:12px"></div>
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.6: Register perlu Access Code RH. Login selepas akaun aktif guna Username + PIN.</div>
+    <div class="notice">Grocery2U by RH v1.3.8: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
   </section>
 
   <section id="appScreen" class="hide">
@@ -85,9 +85,39 @@ async function supaRegisterUser(username,pin,code){
   return await sbFetch('/rest/v1/rpc/grocery2u_register_user_with_access_code',{method:'POST',body:JSON.stringify({p_username:username,p_pin_hash:pin,p_full_name:username,p_code:normalizeAccessCode(code)})});
 }
 async function supaLoginUser(username,pin){
-  const q='/rest/v1/app_users?select=id,username,full_name,created_at,access_code&username=eq.'+encodeURIComponent(username)+'&pin_hash=eq.'+encodeURIComponent(pin)+'&limit=1';
+  const q='/rest/v1/app_users?select=id,username,full_name,created_at,access_code,password_reset_required&username=eq.'+encodeURIComponent(username)+'&pin_hash=eq.'+encodeURIComponent(pin)+'&limit=1';
   const rows=await sbFetch(q,{method:'GET'});
   return Array.isArray(rows)?rows[0]:null;
+}
+
+async function supaChangeUserPassword(userId, oldPassword, newPassword){
+  return await sbFetch('/rest/v1/rpc/grocery2u_user_change_password',{method:'POST',body:JSON.stringify({p_user_id:userId,p_old_password:oldPassword,p_new_password:newPassword})});
+}
+async function supaForceChangePassword(userId, newPassword){
+  return await sbFetch('/rest/v1/rpc/grocery2u_user_force_change_password',{method:'POST',body:JSON.stringify({p_user_id:userId,p_new_password:newPassword})});
+}
+function passwordResetRequired(){return !!(user() && (user().passwordResetRequired || user().password_reset_required));}
+async function promptForcePasswordChange(){
+  const newPass=prompt('Admin telah reset password anda. Masukkan password baru sekarang:');
+  if(!newPass || newPass.length<6){alert('Password baru mesti sekurang-kurangnya 6 aksara.');return promptForcePasswordChange();}
+  const confirmPass=prompt('Sahkan password baru:');
+  if(newPass!==confirmPass){alert('Password tidak sama.');return promptForcePasswordChange();}
+  if(sbReady()){
+    try{await supaForceChangePassword(session.userId,newPass);}catch(e){alert('Gagal tukar password di Supabase: '+e.message);return;}
+  }
+  const u=user(); u.pin=newPass; u.passwordResetRequired=false; u.password_reset_required=false; save(); alert('Password berjaya ditukar.'); renderAll();
+}
+async function changeOwnPassword(){
+  const oldPass=prompt('Password lama:'); if(!oldPass)return;
+  const newPass=prompt('Password baru:'); if(!newPass)return;
+  if(newPass.length<6)return alert('Password baru mesti sekurang-kurangnya 6 aksara.');
+  const confirmPass=prompt('Sahkan password baru:'); if(newPass!==confirmPass)return alert('Password tidak sama.');
+  if(sbReady()){
+    try{await supaChangeUserPassword(session.userId,oldPass,newPass);}catch(e){alert('Gagal tukar password: '+e.message);return;}
+  } else {
+    if(user().pin!==oldPass)return alert('Password lama salah.');
+  }
+  user().pin=newPass; user().passwordResetRequired=false; user().password_reset_required=false; save(); alert('Password berjaya dikemas kini.');
 }
 
 async function supaCreateFamilyForUser(userId, familyName){
@@ -108,8 +138,8 @@ async function registerUserWithCode(){
   const u=document.getElementById('loginUsername').value.trim().toLowerCase();
   const pin=document.getElementById('loginPin').value.trim();
   const code=document.getElementById('accessCode').value.trim();
-  if(!u||!pin)return alert('Masukkan username dan PIN.');
-  if(pin.length<4)return alert('PIN sekurang-kurangnya 4 aksara.');
+  if(!u||!pin)return alert('Masukkan username dan password.');
+  if(pin.length<4)return alert('Password sekurang-kurangnya 4 aksara.');
   if(!isValidRHCode(code))return alert('Kod akses mesti format RH-XXXXXX.');
   if(db.users.find(x=>x.username===u))return alert('Username sudah wujud. Sila login.');
   let supaUserId=null;
@@ -143,17 +173,18 @@ async function login(){
     try{
       const su=await supaLoginUser(u,p);
       if(su){
-        user={id:su.id,username:su.username,pin:p,fullName:su.full_name||su.username,createdAt:su.created_at,status:'active',accessCode:su.access_code};
+        user={id:su.id,username:su.username,pin:p,fullName:su.full_name||su.username,createdAt:su.created_at,status:'active',accessCode:su.access_code,passwordResetRequired:!!su.password_reset_required};
         db.users.push(user);
         seedItems.forEach(i=>db.items.push({id:sid(),ownerUserId:user.id,category:i[0],name:i[1],unit:i[2],active:true}));
         save();
       }
     }catch(e){console.warn('Supabase login failed',e)}
   }
-  if(!user){alert('Username/PIN tidak sah atau akaun belum didaftar.');return}
+  if(!user){alert('Username/password tidak sah atau akaun belum didaftar.');return}
   session={userId:user.id,familyId:db.members.find(m=>m.userId===user.id)?.familyId||null};
   localStorage.setItem('dapurlist_session',JSON.stringify(session));
   boot();
+  if(passwordResetRequired()) setTimeout(promptForcePasswordChange,300);
 }
 function logout(){localStorage.removeItem('dapurlist_session');location.reload()}
 function user(){return db.users.find(x=>x.id===session.userId)}function fam(){return db.families.find(x=>x.id===session.familyId)}
@@ -175,7 +206,7 @@ async function createFamily(){
   }
   const f={id:sid(),name,createdBy:session.userId}; db.families.push(f); db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Owner',nickname:user().username,status:'active'}); save(); setFamily(f.id)
 }
-function addMember(){if(!fam())return alert('Create family dahulu');const username=prompt('Username ahli keluarga? Contoh: isteri');if(!username)return;let u=db.users.find(x=>x.username===username.toLowerCase());if(!u){u={id:sid(),username:username.toLowerCase(),pin:'123456',fullName:username};db.users.push(u)}db.members.push({id:sid(),familyId:fam().id,userId:u.id,role:'Member',nickname:username,status:'active'});save();renderAll();alert('Ahli ditambah. PIN default demo: 123456')}
+function addMember(){if(!fam())return alert('Create family dahulu');const username=prompt('Username ahli keluarga? Contoh: isteri');if(!username)return;let u=db.users.find(x=>x.username===username.toLowerCase());if(!u){u={id:sid(),username:username.toLowerCase(),pin:'123456',fullName:username};db.users.push(u)}db.members.push({id:sid(),familyId:fam().id,userId:u.id,role:'Member',nickname:username,status:'active'});save();renderAll();alert('Ahli ditambah. Password default demo: 123456')}
 function joinFamily(){const code=prompt('Masukkan nama family untuk join demo:');const f=db.families.find(x=>x.name.toLowerCase()===String(code).toLowerCase());if(!f)return alert('Family tidak jumpa dalam demo local ini.');db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Member',nickname:user().username,status:'active'});save();setFamily(f.id)}
 function addItem(){const name=prompt('Nama barang?');if(!name)return;const category=prompt('Kategori?','Barang Kering')||'Lain-lain';const unit=prompt('Unit biasa?','1 unit')||'1 unit';db.items.push({id:sid(),ownerUserId:session.userId,category,name,unit,active:true});save();renderSettings()}
 function toggleItem(id){const it=db.items.find(x=>x.id===id);it.active=!it.active;save();renderSettings()}
@@ -318,7 +349,7 @@ function itemsHtml(){
     <button class="btn fab" title="Tambah barang" onclick="addItem()">+</button>
   </div></div>`
 }
-function renderSettings(){settings.innerHTML=familyHtml()+itemsHtml()}
+function renderSettings(){settings.innerHTML=familyHtml()+`<div class="card"><h3>Account Security</h3><p class="muted">Tukar password akaun Grocery2U anda.</p><button class="btn ghost" onclick="changeOwnPassword()">Tukar Password</button></div>`+itemsHtml()}
 function openSettingsItems(){const btn=[...document.querySelectorAll('.tab')].find(b=>b.textContent.includes('Setting'));showPage('settings',btn);setTimeout(()=>{const target=[...document.querySelectorAll('.settings-head h3')].find(h=>h.textContent.includes('Master'));if(target)target.scrollIntoView({behavior:'smooth',block:'start'});},80)}
 function renderLists(){const familyLists=db.lists.filter(l=>l.familyId===session.familyId);const activeItems=db.items.filter(i=>i.ownerUserId===session.userId&&i.active);lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button>${familyLists.map(l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><span class="pill ${l.status==='completed'?'green':'amber'}">${l.status}</span></div><div><button class="btn small blue" onclick="sendList('${l.id}')">Hantar</button> <button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><div class="category">Barang diminta</div>${l.items.map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}${r.replacement?' → '+r.replacement:''}</p><div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`).join('')||'<div class="card"><p class="muted">Belum ada senarai.</p></div>'}`}
 function renderReceipts(){

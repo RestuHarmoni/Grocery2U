@@ -21,3 +21,7 @@ Total family maksimum: 3,000
 Family per user maksimum: 5
 Access Code: 1 kod = 50 family secara default
 ```
+
+
+## v1.3.8 Password Recovery
+Run: `database/005_password_recovery.sql`
