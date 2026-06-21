@@ -1,6 +1,6 @@
 {
-  "name": "Grocery2U by RH",
-  "version": "1.2.7",
-  "updated_at": "2026-06-21",
-  "cache_name": "grocery2u-rh-1.2.7"
+  "app": "Grocery2U by RH",
+  "version": "1.2.9",
+  "cache": "grocery2u-v1.2.9",
+  "updated_at": "2026-06-21"
 }
