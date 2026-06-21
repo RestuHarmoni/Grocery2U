@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.11</title>
+  <title>Grocery2U by RH v1.3.10</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
   <link rel="manifest" href="manifest.json?v=1.3.9">
@@ -45,7 +45,7 @@
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.11: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
+    <div class="notice">Grocery2U by RH v1.3.10: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
   </section>
 
   <section id="profileScreen" class="screen hide">
@@ -135,47 +135,11 @@ async function changeOwnPassword(){
 
 async function supaCreateFamilyForUser(userId, familyName){
   const invite='RH'+Math.random().toString(36).slice(2,8).toUpperCase();
-  const famRows=await sbFetch('/rest/v1/families',{method:'POST',body:JSON.stringify({family_name:familyName,created_by:userId,account_user_id:userId,invite_code:invite}),headers:{Prefer:'return=representation'}});
+  const famRows=await sbFetch('/rest/v1/families',{method:'POST',body:JSON.stringify({family_name:familyName,created_by:userId,invite_code:invite}),headers:{Prefer:'return=representation'}});
   const fam=Array.isArray(famRows)?famRows[0]:famRows;
   if(!fam || !fam.id) throw new Error('Family tidak berjaya disimpan.');
   await sbFetch('/rest/v1/family_members',{method:'POST',body:JSON.stringify({family_id:fam.id,user_id:userId,role:'owner',nickname:user().username,status:'active'}),headers:{Prefer:'return=minimal'}});
   return fam;
-}
-async function supaEnsureFamily(){
-  if(!sbReady()||!session||!session.userId)return accountFamily();
-  const uname=user()?.username||'Saya';
-  try{
-    let rows=[];
-    try{
-      rows=await sbFetch('/rest/v1/families?select=id,family_name,created_by,account_user_id&or=(account_user_id.eq.'+encodeURIComponent(session.userId)+',created_by.eq.'+encodeURIComponent(session.userId)+')&limit=1',{method:'GET'});
-    }catch(e){
-      rows=await sbFetch('/rest/v1/families?select=id,family_name,created_by&created_by=eq.'+encodeURIComponent(session.userId)+'&limit=1',{method:'GET'});
-    }
-    let sf=Array.isArray(rows)?rows[0]:null;
-    if(!sf){ sf=await supaCreateFamilyForUser(session.userId,'Keluarga '+uname); }
-    let lf=db.families.find(x=>x.accountUserId===session.userId||x.createdBy===session.userId||x.id===sf.id);
-    if(!lf){ lf={id:sf.id,name:sf.family_name||('Keluarga '+uname),accountUserId:session.userId,createdBy:session.userId,createdAt:new Date().toISOString()}; db.families.push(lf); }
-    lf.id=sf.id; lf.name=sf.family_name||lf.name; lf.accountUserId=session.userId; lf.createdBy=session.userId;
-    session.familyId=sf.id; localStorage.setItem('dapurlist_session',JSON.stringify(session)); save();
-    return lf;
-  }catch(e){ console.warn('Supabase family sync failed',e); return accountFamily(); }
-}
-async function supaLoadProfiles(){
-  if(!sbReady()||!session||!session.familyId)return;
-  try{
-    const rows=await sbFetch('/rest/v1/family_profiles?select=id,family_id,name,role,avatar,status,created_at&family_id=eq.'+encodeURIComponent(session.familyId)+'&order=created_at.asc',{method:'GET'});
-    if(Array.isArray(rows)){
-      db.profiles=(db.profiles||[]).filter(p=>p.familyId!==session.familyId);
-      rows.forEach(r=>db.profiles.push({id:r.id,familyId:r.family_id,name:r.name,role:r.role,avatar:r.avatar,status:r.status||'active',createdAt:r.created_at}));
-      save();
-    }
-  }catch(e){ console.warn('Supabase profile load failed',e); }
-}
-async function supaInsertProfile(profileObj){
-  const rows=await sbFetch('/rest/v1/family_profiles',{method:'POST',body:JSON.stringify({family_id:profileObj.familyId,name:profileObj.name,role:profileObj.role,avatar:profileObj.avatar||null,status:'active'}),headers:{Prefer:'return=representation'}});
-  const r=Array.isArray(rows)?rows[0]:rows;
-  if(!r||!r.id)throw new Error('Profil tidak berjaya disimpan.');
-  return {id:r.id,familyId:r.family_id,name:r.name,role:r.role,avatar:r.avatar,status:r.status||'active',createdAt:r.created_at};
 }
 
 function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9-]/g,'').replace(/^RH([A-Z0-9]{6})$/,'RH-$1')}
@@ -239,11 +203,10 @@ function logout(){localStorage.removeItem('dapurlist_session');location.reload()
 function user(){return (db.users||[]).find(x=>x.id===session.userId)}function fam(){return (db.families||[]).find(x=>x.id===session.familyId)}function profile(){return (db.profiles||[]).find(x=>x.id===session.profileId)}
 function accountFamily(){let f=db.families.find(x=>x.accountUserId===session.userId||x.createdBy===session.userId);if(!f){f={id:sid(),name:'Keluarga '+(user()?.username||'Saya'),accountUserId:session.userId,createdBy:session.userId,createdAt:new Date().toISOString()};db.families.push(f);session.familyId=f.id;localStorage.setItem('dapurlist_session',JSON.stringify(session));save()}return f}
 function familyProfiles(){const f=accountFamily();const profiles=Array.isArray(db.profiles)?db.profiles:[];return profiles.filter(p=>p.familyId===f.id&&p.status!=='inactive')}
-async function boot(){
+function boot(){
   if(session&&user()){
     authScreen.classList.add('hide');
-    const f=await supaEnsureFamily(); session.familyId=f.id;
-    await supaLoadProfiles();
+    const f=accountFamily(); session.familyId=f.id;
     const profiles=familyProfiles();
     if(!profiles.length || !session.profileId || !profiles.find(p=>p.id===session.profileId)){
       appScreen.classList.add('hide'); profileScreen.classList.remove('hide'); renderProfileGate(); return;
@@ -262,21 +225,16 @@ function renderProfileGate(){
   <button class="btn ghost" style="margin-top:12px;width:100%" onclick="logout()">Logout</button>`;
 }
 function profileEmoji(role){role=String(role||'').toLowerCase();if(role.includes('ayah')||role.includes('suami'))return '👨';if(role.includes('ibu')||role.includes('isteri'))return '👩';if(role.includes('anak'))return '🧒';return '👤'}
-async function createProfile(){
+function createProfile(){
   const profiles=familyProfiles();
   if(profiles.length>=5)return alert('Maksimum 5 profil sahaja untuk satu family.');
   const defaultRoles=['Ayah','Ibu','Anak 1','Anak 2','Anak 3'];
   const role=prompt('Role profil? Contoh: Ayah, Ibu, Anak 1',defaultRoles[profiles.length]||'Ahli')||'';
   if(!role.trim())return;
   const name=prompt('Nama paparan profil?',role)||role;
-  const f=sbReady()?await supaEnsureFamily():accountFamily();
-  let profileObj={id:sid(),familyId:f.id,name:name.trim(),role:role.trim(),status:'active',createdAt:new Date().toISOString()};
-  if(sbReady()){
-    try{ profileObj=await supaInsertProfile(profileObj); }
-    catch(e){ alert('Gagal simpan profil ke Supabase: '+e.message); return; }
-  }
+  const f=accountFamily();
   db.profiles=db.profiles||[];
-  if(!db.profiles.find(p=>p.id===profileObj.id))db.profiles.push(profileObj);
+  db.profiles.push({id:sid(),familyId:f.id,name:name.trim(),role:role.trim(),status:'active',createdAt:new Date().toISOString()});
   save();renderProfileGate();
 }
 function selectProfile(id){session.profileId=id;localStorage.setItem('dapurlist_session',JSON.stringify(session));boot()}
@@ -470,7 +428,7 @@ function renderReceipts(){
 boot();
 </script>
 <script>
-  const APP_VERSION = '1.3.11';
+  const APP_VERSION = '1.3.1';
   async function registerGrocery2UServiceWorker(){
     if(!('serviceWorker' in navigator)) return;
     try{

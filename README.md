@@ -1,5 +1,8 @@
 # Grocery2U
-## v1.3.11
-Run: `database/007_family_profiles_supabase_write_fix.sql`
 
-Fix: Family profiles now insert/read from Supabase `family_profiles`.
+## v1.3.12 Supabase QA
+Run this SQL if profile insert is blocked by RLS:
+
+```text
+database/008_rls_family_profiles_mvp_fix.sql
+```
