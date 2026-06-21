@@ -1,0 +1,1 @@
+Format RH-XXXXXX. One code can be used by up to max_family families.
