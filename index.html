@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.9</title>
+  <title>Grocery2U by RH v1.3.10</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
   <link rel="manifest" href="manifest.json?v=1.3.9">
@@ -45,7 +45,7 @@
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.9: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
+    <div class="notice">Grocery2U by RH v1.3.10: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
   </section>
 
   <section id="profileScreen" class="screen hide">
@@ -71,7 +71,15 @@
 <script>
 const APP_NAME='Grocery2U by RH';
 const seedItems=[['Sayur','Bayam','1 ikat'],['Sayur','Kangkung','1 ikat'],['Sayur','Sawi','1 ikat'],['Sayur','Kobis','1 biji'],['Sayur','Timun','3 biji'],['Sayur','Tomato','5 biji'],['Sayur','Cili Merah','200g'],['Sayur','Cili Padi','100g'],['Sayur','Bawang Merah','1kg'],['Sayur','Bawang Putih','500g'],['Ayam/Ikan/Daging','Ayam Segar','1 ekor'],['Ayam/Ikan/Daging','Daging Lembu','1kg'],['Ayam/Ikan/Daging','Ikan Kembung','1kg'],['Ayam/Ikan/Daging','Ikan Siakap','1 ekor'],['Ayam/Ikan/Daging','Udang','500g'],['Ayam/Ikan/Daging','Sotong','500g'],['Barang Kering','Beras','5kg'],['Barang Kering','Telur','30 biji'],['Barang Kering','Gula','1kg'],['Barang Kering','Garam','1 paket'],['Barang Kering','Minyak Masak','5kg'],['Barang Kering','Sardin','2 tin'],['Sos/Perasa','Kicap Jalen','1 botol'],['Sos/Perasa','Sos Cili','1 botol'],['Sos/Perasa','Sos Tiram','1 botol'],['Sos/Perasa','Serbuk Kari','1 paket'],['Tepung/Baking','Tepung Gandum','1kg'],['Tepung/Baking','Tepung Beras','1 paket'],['Tepung/Baking','Yis','1 pek'],['Minuman','Susu Dutch Lady','2 kotak'],['Minuman','Milo','1 pek'],['Minuman','Teh','1 kotak'],['Rumah','Sabun Basuh','1 botol'],['Rumah','Tisu','1 pek'],['Rumah','Pencuci Pinggan','1 botol']];
-let db=JSON.parse(localStorage.getItem('dapurlist_v11')||'null')||{users:[],families:[],members:[],items:[],lists:[],receipts:[]};
+let db=JSON.parse(localStorage.getItem('dapurlist_v11')||'null')||{users:[],families:[],members:[],profiles:[],items:[],lists:[],receipts:[]};
+// Migration guard: older cached/localStorage builds may not have the new arrays.
+db.users=db.users||[];
+db.families=db.families||[];
+db.members=db.members||[];
+db.profiles=db.profiles||[];
+db.items=db.items||[];
+db.lists=db.lists||[];
+db.receipts=db.receipts||[];
 let session=JSON.parse(localStorage.getItem('dapurlist_session')||'null');
 function save(){localStorage.setItem('dapurlist_v11',JSON.stringify(db));}
 function sid(){return Math.random().toString(36).slice(2,10)}
@@ -192,9 +200,9 @@ async function login(){
   if(passwordResetRequired()) setTimeout(promptForcePasswordChange,300);
 }
 function logout(){localStorage.removeItem('dapurlist_session');location.reload()}
-function user(){return db.users.find(x=>x.id===session.userId)}function fam(){return db.families.find(x=>x.id===session.familyId)}function profile(){return db.profiles.find(x=>x.id===session.profileId)}
+function user(){return (db.users||[]).find(x=>x.id===session.userId)}function fam(){return (db.families||[]).find(x=>x.id===session.familyId)}function profile(){return (db.profiles||[]).find(x=>x.id===session.profileId)}
 function accountFamily(){let f=db.families.find(x=>x.accountUserId===session.userId||x.createdBy===session.userId);if(!f){f={id:sid(),name:'Keluarga '+(user()?.username||'Saya'),accountUserId:session.userId,createdBy:session.userId,createdAt:new Date().toISOString()};db.families.push(f);session.familyId=f.id;localStorage.setItem('dapurlist_session',JSON.stringify(session));save()}return f}
-function familyProfiles(){const f=accountFamily();return db.profiles.filter(p=>p.familyId===f.id&&p.status!=='inactive')}
+function familyProfiles(){const f=accountFamily();const profiles=Array.isArray(db.profiles)?db.profiles:[];return profiles.filter(p=>p.familyId===f.id&&p.status!=='inactive')}
 function boot(){
   if(session&&user()){
     authScreen.classList.add('hide');
@@ -225,6 +233,7 @@ function createProfile(){
   if(!role.trim())return;
   const name=prompt('Nama paparan profil?',role)||role;
   const f=accountFamily();
+  db.profiles=db.profiles||[];
   db.profiles.push({id:sid(),familyId:f.id,name:name.trim(),role:role.trim(),status:'active',createdAt:new Date().toISOString()});
   save();renderProfileGate();
 }
