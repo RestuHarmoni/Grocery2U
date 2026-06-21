@@ -1,8 +1,8 @@
-# Grocery2U
+# Grocery2U by RH v1.3.13
 
-## v1.3.12 Supabase QA
-Run this SQL if profile insert is blocked by RLS:
+Patch: Family Profile Supabase Persist Fix.
 
-```text
-database/008_rls_family_profiles_mvp_fix.sql
-```
+Run SQL terbaru:
+- `database/009_family_profile_persist_fix.sql`
+
+Selepas run SQL, profile keluarga tidak lagi hilang selepas clear browser kerana app akan load dari Supabase table `family_profiles`.

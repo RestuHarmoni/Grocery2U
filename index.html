@@ -142,6 +142,45 @@ async function supaCreateFamilyForUser(userId, familyName){
   return fam;
 }
 
+
+async function supaGetOrCreateFamilyAndProfiles(){
+  if(!sbReady() || !session || !session.userId || !user()) return null;
+  const uid=session.userId;
+  let famRow=null;
+  try{
+    let rows=await sbFetch('/rest/v1/families?select=id,family_name,created_by,account_user_id,created_at&account_user_id=eq.'+encodeURIComponent(uid)+'&limit=1',{method:'GET'});
+    if(Array.isArray(rows) && rows.length) famRow=rows[0];
+  }catch(e){console.warn('Family lookup by account_user_id failed',e)}
+  if(!famRow){
+    let rows=await sbFetch('/rest/v1/families?select=id,family_name,created_by,account_user_id,created_at&created_by=eq.'+encodeURIComponent(uid)+'&limit=1',{method:'GET'});
+    if(Array.isArray(rows) && rows.length) famRow=rows[0];
+  }
+  if(!famRow){
+    const invite='RH'+Math.random().toString(36).slice(2,8).toUpperCase();
+    const body={family_name:'Keluarga '+user().username,created_by:uid,account_user_id:uid,invite_code:invite};
+    const rows=await sbFetch('/rest/v1/families',{method:'POST',body:JSON.stringify(body),headers:{Prefer:'return=representation'}});
+    famRow=Array.isArray(rows)?rows[0]:rows;
+    try{await sbFetch('/rest/v1/family_members',{method:'POST',body:JSON.stringify({family_id:famRow.id,user_id:uid,role:'owner',nickname:user().username,status:'active'}),headers:{Prefer:'return=minimal'}})}catch(e){console.warn('family_members insert skipped',e)}
+  }
+  if(!famRow || !famRow.id) throw new Error('Family account tidak berjaya dibaca/disimpan di Supabase.');
+  const localFam={id:famRow.id,name:famRow.family_name||('Keluarga '+user().username),accountUserId:famRow.account_user_id||uid,createdBy:famRow.created_by||uid,createdAt:famRow.created_at||new Date().toISOString()};
+  db.families=(db.families||[]).filter(f=>f.id!==localFam.id && f.accountUserId!==uid && f.createdBy!==uid);
+  db.families.push(localFam);
+  session.familyId=localFam.id;
+  localStorage.setItem('dapurlist_session',JSON.stringify(session));
+  const profileRows=await sbFetch('/rest/v1/family_profiles?select=id,family_id,name,role,avatar,status,created_at&family_id=eq.'+encodeURIComponent(localFam.id)+'&order=created_at.asc',{method:'GET'});
+  const mapped=(Array.isArray(profileRows)?profileRows:[]).map(p=>({id:p.id,familyId:p.family_id,name:p.name,role:p.role,avatar:p.avatar,status:p.status||'active',createdAt:p.created_at}));
+  db.profiles=(db.profiles||[]).filter(p=>p.familyId!==localFam.id).concat(mapped);
+  save();
+  return localFam;
+}
+async function supaCreateFamilyProfile(familyId,name,role){
+  const rows=await sbFetch('/rest/v1/family_profiles',{method:'POST',body:JSON.stringify({family_id:familyId,name:name,role:role,status:'active'}),headers:{Prefer:'return=representation'}});
+  const p=Array.isArray(rows)?rows[0]:rows;
+  if(!p || !p.id) throw new Error('Profil tidak berjaya disimpan di Supabase.');
+  return {id:p.id,familyId:p.family_id,name:p.name,role:p.role,avatar:p.avatar,status:p.status||'active',createdAt:p.created_at||new Date().toISOString()};
+}
+
 function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9-]/g,'').replace(/^RH([A-Z0-9]{6})$/,'RH-$1')}
 function isValidRHCode(code){return /^RH-[A-Z0-9]{6}$/.test(normalizeAccessCode(code));}
 function getAccessData(){try{const raw=JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{codes:[]};const codes=(raw.codes||[]).filter(c=>isValidRHCode(c.code)).map(c=>({id:c.id||sid(),code:normalizeAccessCode(c.code),campaignName:c.campaignName||c.campaign_name||'RH Follower Campaign',maxFamily:Number(c.maxFamily||c.max_family||50),usedCount:Number(c.usedCount||c.used_count||0),usedUsers:Array.isArray(c.usedUsers)?c.usedUsers:[],status:c.status==='disabled'?'disabled':'active',createdAt:c.createdAt||c.created_at||new Date().toISOString()}));const data={codes};localStorage.setItem('grocery2u_access_data',JSON.stringify(data));return data}catch(e){return{codes:[]}}}
@@ -203,9 +242,11 @@ function logout(){localStorage.removeItem('dapurlist_session');location.reload()
 function user(){return (db.users||[]).find(x=>x.id===session.userId)}function fam(){return (db.families||[]).find(x=>x.id===session.familyId)}function profile(){return (db.profiles||[]).find(x=>x.id===session.profileId)}
 function accountFamily(){let f=db.families.find(x=>x.accountUserId===session.userId||x.createdBy===session.userId);if(!f){f={id:sid(),name:'Keluarga '+(user()?.username||'Saya'),accountUserId:session.userId,createdBy:session.userId,createdAt:new Date().toISOString()};db.families.push(f);session.familyId=f.id;localStorage.setItem('dapurlist_session',JSON.stringify(session));save()}return f}
 function familyProfiles(){const f=accountFamily();const profiles=Array.isArray(db.profiles)?db.profiles:[];return profiles.filter(p=>p.familyId===f.id&&p.status!=='inactive')}
-function boot(){
+async function boot(){
   if(session&&user()){
     authScreen.classList.add('hide');
+    try{ if(sbReady()) await supaGetOrCreateFamilyAndProfiles(); }
+    catch(e){ console.warn('Supabase family/profile sync failed',e); }
     const f=accountFamily(); session.familyId=f.id;
     const profiles=familyProfiles();
     if(!profiles.length || !session.profileId || !profiles.find(p=>p.id===session.profileId)){
@@ -225,16 +266,30 @@ function renderProfileGate(){
   <button class="btn ghost" style="margin-top:12px;width:100%" onclick="logout()">Logout</button>`;
 }
 function profileEmoji(role){role=String(role||'').toLowerCase();if(role.includes('ayah')||role.includes('suami'))return '👨';if(role.includes('ibu')||role.includes('isteri'))return '👩';if(role.includes('anak'))return '🧒';return '👤'}
-function createProfile(){
+async function createProfile(){
   const profiles=familyProfiles();
   if(profiles.length>=5)return alert('Maksimum 5 profil sahaja untuk satu family.');
   const defaultRoles=['Ayah','Ibu','Anak 1','Anak 2','Anak 3'];
   const role=prompt('Role profil? Contoh: Ayah, Ibu, Anak 1',defaultRoles[profiles.length]||'Ahli')||'';
   if(!role.trim())return;
   const name=prompt('Nama paparan profil?',role)||role;
-  const f=accountFamily();
+  let f=accountFamily();
+  let newProfile=null;
+  if(sbReady()){
+    try{
+      await supaGetOrCreateFamilyAndProfiles();
+      f=accountFamily();
+      newProfile=await supaCreateFamilyProfile(f.id,name.trim(),role.trim());
+    }catch(e){
+      alert('Gagal simpan profil ke Supabase: '+e.message);
+      return;
+    }
+  }else{
+    newProfile={id:sid(),familyId:f.id,name:name.trim(),role:role.trim(),status:'active',createdAt:new Date().toISOString()};
+  }
   db.profiles=db.profiles||[];
-  db.profiles.push({id:sid(),familyId:f.id,name:name.trim(),role:role.trim(),status:'active',createdAt:new Date().toISOString()});
+  db.profiles=db.profiles.filter(p=>p.id!==newProfile.id);
+  db.profiles.push(newProfile);
   save();renderProfileGate();
 }
 function selectProfile(id){session.profileId=id;localStorage.setItem('dapurlist_session',JSON.stringify(session));boot()}
