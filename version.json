@@ -1,1 +1,5 @@
-{"version":"1.3.14","updated_at":"2026-06-21","notes":"Assigned list receiver Supabase fix"}
+{
+  "version": "1.3.15",
+  "updated_at": "2026-06-21",
+  "notes": "Assigned list receiver Supabase fix"
+}

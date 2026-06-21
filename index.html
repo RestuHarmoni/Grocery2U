@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.14</title>
+  <title>Grocery2U by RH v1.3.15</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-  <link rel="manifest" href="manifest.json?v=1.3.14">
+  <link rel="manifest" href="manifest.json?v=1.3.15">
   <meta name="theme-color" content="#16a34a">
   <style>
     :root{--green:#16a34a;--green2:#22c55e;--dark:#0f172a;--muted:#64748b;--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--amber:#f59e0b;--red:#ef4444;--blue:#2563eb;}
@@ -45,7 +45,7 @@
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.10: Register perlu Access Code RH. Login selepas akaun aktif guna Username + Password.</div>
+    <div class="notice">Grocery2U by RH v1.3.15: Family profile + task flow ikut profil aktif.</div>
   </section>
 
   <section id="profileScreen" class="screen hide">
@@ -198,7 +198,7 @@ async function supaLoadShoppingLists(familyId){
   }));
   if(lists.length){
     const ids=lists.map(l=>l.id);
-    const itemRows=await sbFetch('/rest/v1/shopping_list_items?select=id,list_id,item_name,category_name,quantity,note,status,replacement_name,updated_at&list_id=in.('+ids.join(',')+')&order=updated_at.asc',{method:'GET'});
+    const itemRows=await sbFetch('/rest/v1/shopping_list_items?select=id,list_id,item_name,category_name,quantity,note,status,replacement_name,replacement_note,unavailable_reason,unavailable_note,updated_at&list_id=in.('+ids.join(',')+')&order=updated_at.asc',{method:'GET'});
     const items=Array.isArray(itemRows)?itemRows:[];
     lists.forEach(l=>{
       l.items=items.filter(i=>i.list_id===l.id).map(i=>({
@@ -209,7 +209,10 @@ async function supaLoadShoppingLists(familyId){
         unit:i.quantity||'',
         status:i.status||'requested',
         note:i.note||'',
-        replacement:i.replacement_name||''
+        replacement:i.replacement_name||'',
+        replacementNote:i.replacement_note||'',
+        unavailableReason:i.unavailable_reason||'',
+        unavailableNote:i.unavailable_note||''
       }));
     });
   }
@@ -234,10 +237,19 @@ async function supaAddShoppingItem(listId,it){
   const rows=await sbFetch('/rest/v1/shopping_list_items',{method:'POST',body:JSON.stringify({list_id:listId,item_name:it.name,category_name:it.category,quantity:it.unit,status:'requested',note:''}),headers:{Prefer:'return=representation'}});
   const r=Array.isArray(rows)?rows[0]:rows;
   if(!r||!r.id) throw new Error('Barang tidak berjaya disimpan di Supabase.');
-  return {id:r.id,itemId:null,name:r.item_name,category:r.category_name,unit:r.quantity||'',status:r.status||'requested',note:r.note||'',replacement:r.replacement_name||''};
+  return {id:r.id,itemId:null,name:r.item_name,category:r.category_name,unit:r.quantity||'',status:r.status||'requested',note:r.note||'',replacement:r.replacement_name||'',replacementNote:r.replacement_note||'',unavailableReason:r.unavailable_reason||'',unavailableNote:r.unavailable_note||''};
 }
-async function supaUpdateShoppingItem(rowId,status,replacement){
-  await sbFetch('/rest/v1/shopping_list_items?id=eq.'+encodeURIComponent(rowId),{method:'PATCH',body:JSON.stringify({status,replacement_name:replacement||'',updated_at:new Date().toISOString()}),headers:{Prefer:'return=minimal'}});
+async function supaUpdateShoppingItem(rowId,status,extra={}){
+  const body={status,updated_at:new Date().toISOString()};
+  if(status==='replaced'){
+    body.replacement_name=extra.replacement||'';
+    body.replacement_note=extra.replacementNote||'';
+  }
+  if(status==='unavailable'){
+    body.unavailable_reason=extra.unavailableReason||'';
+    body.unavailable_note=extra.unavailableNote||'';
+  }
+  await sbFetch('/rest/v1/shopping_list_items?id=eq.'+encodeURIComponent(rowId),{method:'PATCH',body:JSON.stringify(body),headers:{Prefer:'return=minimal'}});
 }
 async function supaUpdateShoppingListStatus(listId,status){
   const body={status};
@@ -399,13 +411,31 @@ async function addToList(listId,itemId){
 async function setStatus(listId,rowId,status){
   const list=db.lists.find(x=>x.id===listId); if(!list)return;
   const row=list.items.find(i=>i.id===rowId); if(!row)return;
-  let replacement=row.replacement||'';
-  if(status==='replaced') replacement=prompt('Ganti dengan barang apa?',replacement)||'';
+  const extra={};
+  if(status==='replaced'){
+    const replacement=prompt('Ganti dengan barang apa?',row.replacement||'');
+    if(!replacement || !replacement.trim()) return alert('Sila tulis nama barang ganti.');
+    const replacementNote=prompt('Nota sebab ganti barang?',row.replacementNote||'');
+    if(!replacementNote || !replacementNote.trim()) return alert('Sila tulis nota sebab ganti barang.');
+    extra.replacement=replacement.trim();
+    extra.replacementNote=replacementNote.trim();
+  }
+  if(status==='unavailable'){
+    const reason=prompt('Sebab barang tiada? Contoh: Habis stok / Tiada jenama / Tiada saiz',row.unavailableReason||'Habis stok');
+    if(!reason || !reason.trim()) return alert('Sila tulis sebab barang tiada.');
+    const note=prompt('Catatan ringkas untuk penghantar?',row.unavailableNote||'');
+    if(!note || !note.trim()) return alert('Sila tulis catatan ringkas.');
+    extra.unavailableReason=reason.trim();
+    extra.unavailableNote=note.trim();
+  }
   if(sbReady()){
-    try{ await supaUpdateShoppingItem(rowId,status,replacement); }
+    try{ await supaUpdateShoppingItem(rowId,status,extra); }
     catch(e){ alert('Gagal update status di Supabase: '+e.message); return; }
   }
-  row.status=status; row.replacement=replacement; save();renderLists();renderHome();
+  row.status=status;
+  if(status==='replaced'){ row.replacement=extra.replacement; row.replacementNote=extra.replacementNote; }
+  if(status==='unavailable'){ row.unavailableReason=extra.unavailableReason; row.unavailableNote=extra.unavailableNote; }
+  save();renderLists();renderHome();
 }
 async function sendList(id){
   const l=db.lists.find(x=>x.id===id); if(!l)return;
@@ -564,13 +594,41 @@ function renderSettings(){settings.innerHTML=familyHtml()+`<div class="card"><h3
 function openSettingsItems(){const btn=[...document.querySelectorAll('.tab')].find(b=>b.textContent.includes('Setting'));showPage('settings',btn);setTimeout(()=>{const target=[...document.querySelectorAll('.settings-head h3')].find(h=>h.textContent.includes('Master'));if(target)target.scrollIntoView({behavior:'smooth',block:'start'});},80)}
 function renderLists(){
   const currentProfile=profile();
-  const familyLists=db.lists.filter(l=>l.familyId===session.familyId&&(!currentProfile||l.createdByProfileId===currentProfile.id||l.assignedToProfileId===currentProfile.id));
-  const assignedToMe=familyLists.filter(l=>l.assignedToProfileId===currentProfile?.id&&l.status!=='completed');
-  const sentByMe=familyLists.filter(l=>l.createdByProfileId===currentProfile?.id);
   const activeItems=db.items.filter(i=>i.ownerUserId===session.userId&&i.active);
   const nameOf=id=>db.profiles.find(p=>p.id===id)?.name||'-';
-  const cardHtml=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Daripada: <b>${nameOf(l.createdByProfileId)}</b> → Kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${l.status}</span></div><div>${l.createdByProfileId===currentProfile?.id?`<button class="btn small blue" onclick="sendList('${l.id}')">Hantar</button> `:''}<button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}${r.replacement?' → '+r.replacement:''}</p><div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
-  lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button><p class="muted">Profil aktif: <b>${currentProfile?.name||'-'}</b>. Senarai boleh dihantar kepada Ayah, Ibu atau Anak.</p><div class="category">Untuk Saya</div>${assignedToMe.map(cardHtml).join('')||'<div class="card"><p class="muted">Belum ada senarai diterima untuk profil ini.</p></div>'}<div class="category">Saya Hantar / Saya Buat</div>${sentByMe.map(cardHtml).join('')||'<div class="card"><p class="muted">Belum ada senarai dihantar oleh profil ini.</p></div>'}`
+  const statusLabel={draft:'Draft',sent:'Menunggu diterima',accepted:'Diterima',shopping:'Sedang membeli',completed:'Selesai'};
+  const itemDone=it=>['bought','replaced','unavailable'].includes(it.status);
+  const progress=l=>{const total=(l.items||[]).length; const done=(l.items||[]).filter(itemDone).length; return total?Math.round(done/total*100):0;};
+  const familyLists=db.lists.filter(l=>l.familyId===session.familyId);
+  const assignedToMe=familyLists.filter(l=>l.assignedToProfileId===currentProfile?.id&&l.status!=='completed');
+  const sentByMe=familyLists.filter(l=>l.createdByProfileId===currentProfile?.id);
+  const familyActivity=familyLists.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).slice(0,8);
+  const progressLists=familyLists.filter(l=>l.status!=='draft').slice(0,5);
+  const isReceiver=l=>l.assignedToProfileId===currentProfile?.id;
+  const isSender=l=>l.createdByProfileId===currentProfile?.id;
+  const itemDetails=r=>{
+    let extra='';
+    if(r.status==='replaced') extra=`<div class="notice" style="margin-top:8px"><b>Diganti:</b> ${r.replacement||'-'}<br><span>${r.replacementNote||''}</span></div>`;
+    if(r.status==='unavailable') extra=`<div class="notice" style="margin-top:8px;background:#fff7ed;border-color:#fed7aa;color:#9a3412"><b>Tiada:</b> ${r.unavailableReason||'-'}<br><span>${r.unavailableNote||''}</span></div>`;
+    return extra;
+  };
+  const receiverCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">${nameOf(l.createdByProfileId)} minta anda beli</p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><div>${l.status==='sent'?`<button class="btn small blue" onclick="acceptTask('${l.id}')">Terima</button>`:''}<button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">Progress: ${progress(l)}% • ${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}<div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
+  const senderCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Dihantar kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p>${l.status==='draft'?`<div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><button class="btn small blue" style="margin-top:10px" onclick="sendList('${l.id}')">Hantar</button>`:''}<div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}</div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
+  const progressCard=l=>`<div class="card"><div class="between"><div><b>${l.title}</b><p class="muted">${nameOf(l.createdByProfileId)} → ${nameOf(l.assignedToProfileId)}</p></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div></div>`;
+  const activityLine=l=>`<div class="activity-line"><span>${nameOf(l.createdByProfileId)} hantar senarai kepada ${nameOf(l.assignedToProfileId)}: <b>${l.title}</b></span><span>${statusLabel[l.status]||l.status}</span></div>`;
+  lists.innerHTML=`<button class="btn" onclick="createList()">+ Buat Senarai Baru</button><p class="muted">Profil aktif: <b>${currentProfile?.name||'-'}</b>. Ruang tugasan hanya papar senarai yang berkaitan dengan profil ini.</p>
+  <div class="category">📥 Tugasan Untuk Saya</div>${assignedToMe.map(receiverCard).join('')||'<div class="card"><p class="muted">Tiada tugasan untuk anda.</p></div>'}
+  <div class="category">📤 Permintaan Saya</div>${sentByMe.map(senderCard).join('')||'<div class="card"><p class="muted">Belum ada permintaan dihantar oleh profil ini.</p></div>'}
+  <div class="category">📊 Progress Belian</div>${progressLists.map(progressCard).join('')||'<div class="card"><p class="muted">Belum ada progress belian.</p></div>'}
+  <div class="category">👨‍👩‍👧‍👦 Aktiviti Family</div><div class="card">${familyActivity.map(activityLine).join('')||'<p class="muted">Belum ada aktiviti family.</p>'}</div>`;
+}
+async function acceptTask(id){
+  const l=db.lists.find(x=>x.id===id); if(!l)return;
+  if(sbReady()){
+    try{ await supaUpdateShoppingListStatus(id,'accepted'); }
+    catch(e){ alert('Gagal terima tugasan di Supabase: '+e.message); return; }
+  }
+  l.status='accepted';save();renderLists();renderHome();
 }
 function renderReceipts(){
   const rec=db.receipts.filter(r=>r.familyId===session.familyId).sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -588,7 +646,7 @@ function renderReceipts(){
 boot();
 </script>
 <script>
-  const APP_VERSION = '1.3.14';
+  const APP_VERSION = '1.3.15';
   async function registerGrocery2UServiceWorker(){
     if(!('serviceWorker' in navigator)) return;
     try{
