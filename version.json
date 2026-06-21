@@ -1,1 +1,1 @@
-{"version":"1.3.10","name":"Grocery2U by RH","notes":"Blank screen profile gate fix: safe db.profiles migration and Create Profile fallback."}
+{"version":"1.3.11","name":"Grocery2U by RH","notes":"Family profiles now write/read from Supabase family_profiles table."}
