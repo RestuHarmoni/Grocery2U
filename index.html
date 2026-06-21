@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.1</title>
+  <title>Grocery2U by RH v1.3.3</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
   <link rel="manifest" href="manifest.json?v=1.3.1">
@@ -40,12 +40,12 @@
       <div style="height:10px"></div>
       <input id="loginPin" class="input" placeholder="PIN" type="password" />
       <div style="height:10px"></div>
-      <input id="accessCode" class="input" placeholder="Access Code contoh: RH26-A7K9" />
+      <input id="accessCode" class="input" placeholder="Access Code contoh: RH-A7K9X2" />
       <div style="height:12px"></div>
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.1: Register perlu Access Code RH. Login selepas akaun aktif guna Username + PIN.</div>
+    <div class="notice">Grocery2U by RH v1.3.3: Register perlu Access Code RH. Login selepas akaun aktif guna Username + PIN.</div>
   </section>
 
   <section id="appScreen" class="hide">
@@ -70,10 +70,11 @@ let db=JSON.parse(localStorage.getItem('dapurlist_v11')||'null')||{users:[],fami
 let session=JSON.parse(localStorage.getItem('dapurlist_session')||'null');
 function save(){localStorage.setItem('dapurlist_v11',JSON.stringify(db));}
 function sid(){return Math.random().toString(36).slice(2,10)}
-function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/^([A-Z0-9]{4})([A-Z0-9]{4})$/,'$1-$2')}
-function getAccessData(){try{return JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{batches:[],codes:[]}}catch(e){return{batches:[],codes:[]}}}
-function saveAccessData(data){localStorage.setItem('grocery2u_access_data',JSON.stringify(data));}
-function validateAccessCode(raw, username){const code=normalizeAccessCode(raw);const data=getAccessData();const row=data.codes.find(c=>normalizeAccessCode(c.code)===code);if(!row)return{ok:false,msg:'Access Code tidak sah. Minta kod RH daripada admin/follower campaign.'};if(row.status==='used')return{ok:false,msg:'Access Code sudah digunakan.'};row.status='used';row.usedBy=username;row.usedAt=new Date().toISOString();saveAccessData(data);return{ok:true,code}}
+function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9-]/g,'').replace(/^RH([A-Z0-9]{6})$/,'RH-$1')}
+function isValidRHCode(code){return /^RH-[A-Z0-9]{6}$/.test(normalizeAccessCode(code));}
+function getAccessData(){try{const raw=JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{codes:[]};const codes=(raw.codes||[]).filter(c=>isValidRHCode(c.code)).map(c=>({id:c.id||sid(),code:normalizeAccessCode(c.code),campaignName:c.campaignName||c.campaign_name||'RH Follower Campaign',maxFamily:Number(c.maxFamily||c.max_family||50),usedCount:Number(c.usedCount||c.used_count||0),usedUsers:Array.isArray(c.usedUsers)?c.usedUsers:[],status:c.status==='disabled'?'disabled':'active',createdAt:c.createdAt||c.created_at||new Date().toISOString()}));const data={codes};localStorage.setItem('grocery2u_access_data',JSON.stringify(data));return data}catch(e){return{codes:[]}}}
+function saveAccessData(data){localStorage.setItem('grocery2u_access_data',JSON.stringify({codes:data.codes||[]}));}
+function validateAccessCode(raw, username){const code=normalizeAccessCode(raw);const data=getAccessData();const row=data.codes.find(c=>normalizeAccessCode(c.code)===code);if(!row)return{ok:false,msg:'Access Code tidak sah. Minta kod RH daripada admin/follower campaign.'};if(row.status==='disabled')return{ok:false,msg:'Access Code tidak aktif.'};if((row.usedCount||0)>=(row.maxFamily||50))return{ok:false,msg:'Access Code telah mencapai had penggunaan.'};row.usedCount=(row.usedCount||0)+1;row.usedUsers=row.usedUsers||[];row.usedUsers.push({username,usedAt:new Date().toISOString()});saveAccessData(data);return{ok:true,code}}
 function registerUserWithCode(){const u=document.getElementById('loginUsername').value.trim().toLowerCase();const pin=document.getElementById('loginPin').value.trim();const code=document.getElementById('accessCode').value.trim();if(!u||!pin)return alert('Masukkan username dan PIN.');if(pin.length<4)return alert('PIN sekurang-kurangnya 4 aksara.');if(db.users.find(x=>x.username===u))return alert('Username sudah wujud. Sila login.');const valid=validateAccessCode(code,u);if(!valid.ok)return alert(valid.msg);const user={id:sid(),username:u,pin,fullName:u,createdAt:new Date().toISOString(),status:'active',accessCode:valid.code};db.users.push(user);seedItems.forEach(i=>db.items.push({id:sid(),ownerUserId:user.id,category:i[0],name:i[1],unit:i[2],active:true}));save();session={userId:user.id,familyId:null};localStorage.setItem('dapurlist_session',JSON.stringify(session));alert('Akaun berjaya didaftar dengan kod '+valid.code);boot();}
 function login(){const u=document.getElementById('loginUsername').value.trim().toLowerCase();const p=document.getElementById('loginPin').value.trim();const user=db.users.find(x=>x.username===u&&x.pin===p);if(!user){alert('Username/PIN tidak sah atau akaun belum didaftar.');return}session={userId:user.id,familyId:db.members.find(m=>m.userId===user.id)?.familyId||null};localStorage.setItem('dapurlist_session',JSON.stringify(session));boot();}
 function logout(){localStorage.removeItem('dapurlist_session');location.reload()}
