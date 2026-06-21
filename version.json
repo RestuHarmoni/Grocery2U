@@ -1,6 +1,1 @@
-{
-  "version": "1.3.1",
-  "name": "Grocery2U by RH",
-  "updated": "2026-06-21",
-  "notes": "Access Code Generator di admin; format RH26-A7K9; 1 kod = 1 akaun/family access."
-}
+{"version":"1.3.6","name":"Grocery2U by RH","notes":"Supabase integration fix for admin access codes, user register records and admin dashboard data source."}

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Grocery2U by RH v1.3.1</title>
+  <title>Grocery2U by RH v1.3.6</title>
   <link rel="icon" href="favicon.ico">
   <link rel="apple-touch-icon" href="assets/icons/icon-180.png">
-  <link rel="manifest" href="manifest.json?v=1.3.1">
+  <link rel="manifest" href="manifest.json?v=1.3.6">
   <meta name="theme-color" content="#16a34a">
   <style>
     :root{--green:#16a34a;--green2:#22c55e;--dark:#0f172a;--muted:#64748b;--bg:#f1f5f9;--card:#fff;--line:#e2e8f0;--amber:#f59e0b;--red:#ef4444;--blue:#2563eb;}
@@ -40,12 +40,12 @@
       <div style="height:10px"></div>
       <input id="loginPin" class="input" placeholder="PIN" type="password" />
       <div style="height:10px"></div>
-      <input id="accessCode" class="input" placeholder="Access Code contoh: RH26-A7K9" />
+      <input id="accessCode" class="input" placeholder="Access Code contoh: RH-A7K9X2" />
       <div style="height:12px"></div>
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.1: Register perlu Access Code RH. Login selepas akaun aktif guna Username + PIN.</div>
+    <div class="notice">Grocery2U by RH v1.3.6: Register perlu Access Code RH. Login selepas akaun aktif guna Username + PIN.</div>
   </section>
 
   <section id="appScreen" class="hide">
@@ -70,18 +70,111 @@ let db=JSON.parse(localStorage.getItem('dapurlist_v11')||'null')||{users:[],fami
 let session=JSON.parse(localStorage.getItem('dapurlist_session')||'null');
 function save(){localStorage.setItem('dapurlist_v11',JSON.stringify(db));}
 function sid(){return Math.random().toString(36).slice(2,10)}
-function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/^([A-Z0-9]{4})([A-Z0-9]{4})$/,'$1-$2')}
-function getAccessData(){try{return JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{batches:[],codes:[]}}catch(e){return{batches:[],codes:[]}}}
-function saveAccessData(data){localStorage.setItem('grocery2u_access_data',JSON.stringify(data));}
-function validateAccessCode(raw, username){const code=normalizeAccessCode(raw);const data=getAccessData();const row=data.codes.find(c=>normalizeAccessCode(c.code)===code);if(!row)return{ok:false,msg:'Access Code tidak sah. Minta kod RH daripada admin/follower campaign.'};if(row.status==='used')return{ok:false,msg:'Access Code sudah digunakan.'};row.status='used';row.usedBy=username;row.usedAt=new Date().toISOString();saveAccessData(data);return{ok:true,code}}
-function registerUserWithCode(){const u=document.getElementById('loginUsername').value.trim().toLowerCase();const pin=document.getElementById('loginPin').value.trim();const code=document.getElementById('accessCode').value.trim();if(!u||!pin)return alert('Masukkan username dan PIN.');if(pin.length<4)return alert('PIN sekurang-kurangnya 4 aksara.');if(db.users.find(x=>x.username===u))return alert('Username sudah wujud. Sila login.');const valid=validateAccessCode(code,u);if(!valid.ok)return alert(valid.msg);const user={id:sid(),username:u,pin,fullName:u,createdAt:new Date().toISOString(),status:'active',accessCode:valid.code};db.users.push(user);seedItems.forEach(i=>db.items.push({id:sid(),ownerUserId:user.id,category:i[0],name:i[1],unit:i[2],active:true}));save();session={userId:user.id,familyId:null};localStorage.setItem('dapurlist_session',JSON.stringify(session));alert('Akaun berjaya didaftar dengan kod '+valid.code);boot();}
-function login(){const u=document.getElementById('loginUsername').value.trim().toLowerCase();const p=document.getElementById('loginPin').value.trim();const user=db.users.find(x=>x.username===u&&x.pin===p);if(!user){alert('Username/PIN tidak sah atau akaun belum didaftar.');return}session={userId:user.id,familyId:db.members.find(m=>m.userId===user.id)?.familyId||null};localStorage.setItem('dapurlist_session',JSON.stringify(session));boot();}
+
+function sbConfig(){return window.GROCERY2U_SUPABASE||{};}
+function sbReady(){const c=sbConfig();return !!(c.url&&c.anonKey&&c.url.includes('supabase.co'));}
+async function sbFetch(path, options={}){
+  const c=sbConfig();
+  const res=await fetch(c.url+path,{...options,headers:{apikey:c.anonKey,Authorization:'Bearer '+c.anonKey,'Content-Type':'application/json',...(options.headers||{})}});
+  const text=await res.text();
+  let data=null;try{data=text?JSON.parse(text):null}catch(e){data=text}
+  if(!res.ok){throw new Error((data&&data.message)||text||('Supabase error '+res.status));}
+  return data;
+}
+async function supaRegisterUser(username,pin,code){
+  return await sbFetch('/rest/v1/rpc/grocery2u_register_user_with_access_code',{method:'POST',body:JSON.stringify({p_username:username,p_pin_hash:pin,p_full_name:username,p_code:normalizeAccessCode(code)})});
+}
+async function supaLoginUser(username,pin){
+  const q='/rest/v1/app_users?select=id,username,full_name,created_at,access_code&username=eq.'+encodeURIComponent(username)+'&pin_hash=eq.'+encodeURIComponent(pin)+'&limit=1';
+  const rows=await sbFetch(q,{method:'GET'});
+  return Array.isArray(rows)?rows[0]:null;
+}
+
+async function supaCreateFamilyForUser(userId, familyName){
+  const invite='RH'+Math.random().toString(36).slice(2,8).toUpperCase();
+  const famRows=await sbFetch('/rest/v1/families',{method:'POST',body:JSON.stringify({family_name:familyName,created_by:userId,invite_code:invite}),headers:{Prefer:'return=representation'}});
+  const fam=Array.isArray(famRows)?famRows[0]:famRows;
+  if(!fam || !fam.id) throw new Error('Family tidak berjaya disimpan.');
+  await sbFetch('/rest/v1/family_members',{method:'POST',body:JSON.stringify({family_id:fam.id,user_id:userId,role:'owner',nickname:user().username,status:'active'}),headers:{Prefer:'return=minimal'}});
+  return fam;
+}
+
+function normalizeAccessCode(v){return String(v||'').toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9-]/g,'').replace(/^RH([A-Z0-9]{6})$/,'RH-$1')}
+function isValidRHCode(code){return /^RH-[A-Z0-9]{6}$/.test(normalizeAccessCode(code));}
+function getAccessData(){try{const raw=JSON.parse(localStorage.getItem('grocery2u_access_data')||'null')||{codes:[]};const codes=(raw.codes||[]).filter(c=>isValidRHCode(c.code)).map(c=>({id:c.id||sid(),code:normalizeAccessCode(c.code),campaignName:c.campaignName||c.campaign_name||'RH Follower Campaign',maxFamily:Number(c.maxFamily||c.max_family||50),usedCount:Number(c.usedCount||c.used_count||0),usedUsers:Array.isArray(c.usedUsers)?c.usedUsers:[],status:c.status==='disabled'?'disabled':'active',createdAt:c.createdAt||c.created_at||new Date().toISOString()}));const data={codes};localStorage.setItem('grocery2u_access_data',JSON.stringify(data));return data}catch(e){return{codes:[]}}}
+function saveAccessData(data){localStorage.setItem('grocery2u_access_data',JSON.stringify({codes:data.codes||[]}));}
+function validateAccessCode(raw, username){const code=normalizeAccessCode(raw);const data=getAccessData();const row=data.codes.find(c=>normalizeAccessCode(c.code)===code);if(!row)return{ok:false,msg:'Access Code tidak sah. Minta kod RH daripada admin/follower campaign.'};if(row.status==='disabled')return{ok:false,msg:'Access Code tidak aktif.'};if((row.usedCount||0)>=(row.maxFamily||50))return{ok:false,msg:'Access Code telah mencapai had penggunaan.'};row.usedCount=(row.usedCount||0)+1;row.usedUsers=row.usedUsers||[];row.usedUsers.push({username,usedAt:new Date().toISOString()});saveAccessData(data);return{ok:true,code}}
+async function registerUserWithCode(){
+  const u=document.getElementById('loginUsername').value.trim().toLowerCase();
+  const pin=document.getElementById('loginPin').value.trim();
+  const code=document.getElementById('accessCode').value.trim();
+  if(!u||!pin)return alert('Masukkan username dan PIN.');
+  if(pin.length<4)return alert('PIN sekurang-kurangnya 4 aksara.');
+  if(!isValidRHCode(code))return alert('Kod akses mesti format RH-XXXXXX.');
+  if(db.users.find(x=>x.username===u))return alert('Username sudah wujud. Sila login.');
+  let supaUserId=null;
+  if(sbReady()){
+    try{
+      const result=await supaRegisterUser(u,pin,code);
+      supaUserId=(result&&result.user_id)||null;
+    }catch(e){
+      alert('Daftar gagal di Supabase: '+e.message);
+      return;
+    }
+  }else{
+    const valid=validateAccessCode(code,u);
+    if(!valid.ok)return alert(valid.msg);
+  }
+  const normalized=normalizeAccessCode(code);
+  const user={id:supaUserId||sid(),username:u,pin,fullName:u,createdAt:new Date().toISOString(),status:'active',accessCode:normalized};
+  db.users.push(user);
+  seedItems.forEach(i=>db.items.push({id:sid(),ownerUserId:user.id,category:i[0],name:i[1],unit:i[2],active:true}));
+  save();
+  session={userId:user.id,familyId:null};
+  localStorage.setItem('dapurlist_session',JSON.stringify(session));
+  alert('Akaun berjaya didaftar dengan kod '+normalized);
+  boot();
+}
+async function login(){
+  const u=document.getElementById('loginUsername').value.trim().toLowerCase();
+  const p=document.getElementById('loginPin').value.trim();
+  let user=db.users.find(x=>x.username===u&&x.pin===p);
+  if(!user && sbReady()){
+    try{
+      const su=await supaLoginUser(u,p);
+      if(su){
+        user={id:su.id,username:su.username,pin:p,fullName:su.full_name||su.username,createdAt:su.created_at,status:'active',accessCode:su.access_code};
+        db.users.push(user);
+        seedItems.forEach(i=>db.items.push({id:sid(),ownerUserId:user.id,category:i[0],name:i[1],unit:i[2],active:true}));
+        save();
+      }
+    }catch(e){console.warn('Supabase login failed',e)}
+  }
+  if(!user){alert('Username/PIN tidak sah atau akaun belum didaftar.');return}
+  session={userId:user.id,familyId:db.members.find(m=>m.userId===user.id)?.familyId||null};
+  localStorage.setItem('dapurlist_session',JSON.stringify(session));
+  boot();
+}
 function logout(){localStorage.removeItem('dapurlist_session');location.reload()}
 function user(){return db.users.find(x=>x.id===session.userId)}function fam(){return db.families.find(x=>x.id===session.familyId)}
 function boot(){if(session&&user()){authScreen.classList.add('hide');appScreen.classList.remove('hide');renderAll();}else{authScreen.classList.remove('hide');appScreen.classList.add('hide')}}
 function showPage(id,el){document.querySelectorAll('.page').forEach(p=>p.classList.add('hide'));document.getElementById(id).classList.remove('hide');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');pageTitle.textContent={home:'Home',lists:'Senarai Beli',receipts:'Resit & Claim',settings:'Setting'}[id];}
 function setFamily(id){session.familyId=id;localStorage.setItem('dapurlist_session',JSON.stringify(session));renderAll()}
-function createFamily(){const created=db.families.filter(f=>f.createdBy===session.userId).length;if(created>=5){alert('Had maksimum 5 family sahaja untuk setiap akaun.');return;}const name=prompt('Nama family?','Keluarga Shuq');if(!name)return;const f={id:sid(),name,createdBy:session.userId};db.families.push(f);db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Owner',nickname:user().username,status:'active'});save();setFamily(f.id)}
+async function createFamily(){
+  const created=db.families.filter(f=>f.createdBy===session.userId).length;
+  if(created>=5){alert('Had maksimum 5 family sahaja untuk setiap akaun.');return;}
+  const name=prompt('Nama family?','Keluarga Shuq'); if(!name)return;
+  if(sbReady()){
+    try{
+      const sf=await supaCreateFamilyForUser(session.userId,name);
+      const f={id:sf.id,name:sf.family_name,createdBy:session.userId,createdAt:sf.created_at};
+      db.families.push(f);
+      db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Owner',nickname:user().username,status:'active'});
+      save(); setFamily(f.id); alert('Family berjaya disimpan ke Supabase.'); return;
+    }catch(e){alert('Gagal simpan family ke Supabase: '+e.message); return;}
+  }
+  const f={id:sid(),name,createdBy:session.userId}; db.families.push(f); db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Owner',nickname:user().username,status:'active'}); save(); setFamily(f.id)
+}
 function addMember(){if(!fam())return alert('Create family dahulu');const username=prompt('Username ahli keluarga? Contoh: isteri');if(!username)return;let u=db.users.find(x=>x.username===username.toLowerCase());if(!u){u={id:sid(),username:username.toLowerCase(),pin:'123456',fullName:username};db.users.push(u)}db.members.push({id:sid(),familyId:fam().id,userId:u.id,role:'Member',nickname:username,status:'active'});save();renderAll();alert('Ahli ditambah. PIN default demo: 123456')}
 function joinFamily(){const code=prompt('Masukkan nama family untuk join demo:');const f=db.families.find(x=>x.name.toLowerCase()===String(code).toLowerCase());if(!f)return alert('Family tidak jumpa dalam demo local ini.');db.members.push({id:sid(),familyId:f.id,userId:session.userId,role:'Member',nickname:user().username,status:'active'});save();setFamily(f.id)}
 function addItem(){const name=prompt('Nama barang?');if(!name)return;const category=prompt('Kategori?','Barang Kering')||'Lain-lain';const unit=prompt('Unit biasa?','1 unit')||'1 unit';db.items.push({id:sid(),ownerUserId:session.userId,category,name,unit,active:true});save();renderSettings()}
