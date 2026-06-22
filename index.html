@@ -45,7 +45,7 @@
       <button class="btn" style="width:100%" onclick="login()">Login</button>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="registerUserWithCode()">Daftar Akaun Dengan Kod</button>
     </div>
-    <div class="notice">Grocery2U by RH v1.3.15: Family profile + task flow ikut profil aktif.</div>
+    <div class="notice">Grocery2U by RH v1.3.18: Total belanja, history dan tugasan selesai.</div>
   </section>
 
   <section id="profileScreen" class="screen hide">
@@ -62,7 +62,7 @@
     <nav class="tabs">
       <button class="tab active" onclick="showPage('home',this)">🏠<br>Home</button>
       <button class="tab" onclick="showPage('lists',this)">🛒<br>Senarai</button>
-      <button class="tab" onclick="showPage('receipts',this)">💰<br>Claim</button>
+      <button class="tab" onclick="showPage('receipts',this)">📜<br>History</button>
       <button class="tab" onclick="showPage('settings',this)">⚙️<br>Setting</button>
     </nav>
   </section>
@@ -183,7 +183,7 @@ async function supaCreateFamilyProfile(familyId,name,role){
 
 async function supaLoadShoppingLists(familyId){
   if(!sbReady() || !familyId) return;
-  const listRows=await sbFetch('/rest/v1/shopping_lists?select=id,family_id,title,created_by_user_id,created_by_profile_id,assigned_to_profile_id,status,created_at,completed_at&family_id=eq.'+encodeURIComponent(familyId)+'&order=created_at.desc',{method:'GET'});
+  const listRows=await sbFetch('/rest/v1/shopping_lists?select=id,family_id,title,created_by_user_id,created_by_profile_id,assigned_to_profile_id,status,created_at,completed_at,total_amount,completion_note&family_id=eq.'+encodeURIComponent(familyId)+'&order=created_at.desc',{method:'GET'});
   const lists=(Array.isArray(listRows)?listRows:[]).map(l=>({
     id:l.id,
     familyId:l.family_id,
@@ -194,7 +194,9 @@ async function supaLoadShoppingLists(familyId){
     status:l.status||'draft',
     items:[],
     createdAt:l.created_at,
-    completedAt:l.completed_at
+    completedAt:l.completed_at,
+    totalAmount:Number(l.total_amount||0),
+    completionNote:l.completion_note||''
   }));
   if(lists.length){
     const ids=lists.map(l=>l.id);
@@ -251,9 +253,13 @@ async function supaUpdateShoppingItem(rowId,status,extra={}){
   }
   await sbFetch('/rest/v1/shopping_list_items?id=eq.'+encodeURIComponent(rowId),{method:'PATCH',body:JSON.stringify(body),headers:{Prefer:'return=minimal'}});
 }
-async function supaUpdateShoppingListStatus(listId,status){
+async function supaUpdateShoppingListStatus(listId,status,extra={}){
   const body={status};
-  if(status==='completed') body.completed_at=new Date().toISOString();
+  if(status==='completed'){
+    body.completed_at=new Date().toISOString();
+    body.total_amount=Number(extra.totalAmount||0);
+    body.completion_note=extra.completionNote||'';
+  }
   await sbFetch('/rest/v1/shopping_lists?id=eq.'+encodeURIComponent(listId),{method:'PATCH',body:JSON.stringify(body),headers:{Prefer:'return=minimal'}});
 }
 
@@ -372,7 +378,7 @@ async function createProfile(){
 function selectProfile(id){session.profileId=id;localStorage.setItem('dapurlist_session',JSON.stringify(session));boot()}
 function switchProfile(){session.profileId=null;localStorage.setItem('dapurlist_session',JSON.stringify(session));boot()}
 
-function showPage(id,el){document.querySelectorAll('.page').forEach(p=>p.classList.add('hide'));document.getElementById(id).classList.remove('hide');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');pageTitle.textContent={home:'Home',lists:'Senarai Beli',receipts:'Resit & Claim',settings:'Setting'}[id];}
+function showPage(id,el){document.querySelectorAll('.page').forEach(p=>p.classList.add('hide'));document.getElementById(id).classList.remove('hide');document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');pageTitle.textContent={home:'Home',lists:'Senarai Beli',receipts:'Sejarah Belanja',settings:'Setting'}[id];}
 function setFamily(id){session.familyId=id;localStorage.setItem('dapurlist_session',JSON.stringify(session));renderAll()}
 async function createFamily(){return accountFamily()}
 function addMember(){return createProfile()}
@@ -447,11 +453,24 @@ async function sendList(id){
 }
 async function completeList(id){
   const l=db.lists.find(x=>x.id===id); if(!l)return;
+  const done=(l.items||[]).filter(i=>['bought','replaced','unavailable'].includes(i.status)).length;
+  const total=(l.items||[]).length;
+  if(!total) return alert('Senarai ini belum ada barang.');
+  if(done<total) return alert(`Belum boleh complete. Selesaikan semua barang dahulu (${done}/${total}).`);
+  const amountRaw=prompt('Jumlah belanja sebenar? Contoh: 86.50','');
+  if(amountRaw===null) return;
+  const amount=Number(String(amountRaw).replace(/[^0-9.]/g,''));
+  if(!amount || amount<=0) return alert('Masukkan jumlah belanja yang sah.');
+  const note=prompt('Nota belanja (optional)','')||'';
   if(sbReady()){
-    try{ await supaUpdateShoppingListStatus(id,'completed'); }
+    try{ await supaUpdateShoppingListStatus(id,'completed',{totalAmount:amount,completionNote:note}); }
     catch(e){ alert('Gagal lengkapkan senarai di Supabase: '+e.message); return; }
   }
-  l.status='completed';l.completedAt=new Date().toISOString();save();renderLists();renderHome();
+  l.status='completed';
+  l.completedAt=new Date().toISOString();
+  l.totalAmount=amount;
+  l.completionNote=note;
+  save();renderLists();renderHome();renderReceipts();
 }
 function uploadReceipt(){
   if(!fam())return alert('Pilih family dahulu');
@@ -500,9 +519,12 @@ const now=new Date();
 const day=(now.getDay()+6)%7;
 const monday=new Date(now);monday.setDate(now.getDate()-day);
 const sunday=new Date(monday);sunday.setDate(monday.getDate()+6);
-const weeklyReceipts=db.receipts.filter(r=>r.familyId===session.familyId&&new Date(r.date)>=monday&&new Date(r.date)<=new Date(sunday.getFullYear(),sunday.getMonth(),sunday.getDate(),23,59,59));
-const weeklyTotal=weeklyReceipts.reduce((s,r)=>s+r.amount,0);
-const totalClaim=db.receipts.filter(r=>r.familyId===session.familyId&&r.claimStatus==='unpaid').reduce((s,r)=>s+r.amount,0);
+const completedLists=db.lists.filter(l=>l.familyId===session.familyId&&l.status==='completed');
+const weeklyCompleted=completedLists.filter(l=>l.completedAt&&new Date(l.completedAt)>=monday&&new Date(l.completedAt)<=new Date(sunday.getFullYear(),sunday.getMonth(),sunday.getDate(),23,59,59));
+const weeklyTotal=weeklyCompleted.reduce((s,l)=>s+Number(l.totalAmount||0),0);
+const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+const monthlyTotal=completedLists.filter(l=>l.completedAt&&new Date(l.completedAt)>=monthStart).reduce((s,l)=>s+Number(l.totalAmount||0),0);
+const familyTotal=completedLists.reduce((s,l)=>s+Number(l.totalAmount||0),0);
 const pct=total?Math.round((bought/total)*100):0;
 const fDate=d=>d.toLocaleDateString('ms-MY',{day:'numeric',month:'short'});
 home.innerHTML=`
@@ -510,7 +532,7 @@ home.innerHTML=`
   <div class="brand"><img class="brand-icon" src="assets/icons/icon-96.png" alt="Grocery2U icon"><div><h1>Hi, ${profile()?.name||user().username} 👋</h1><p>${fam()?fam().name:'Akaun family belum aktif.'}</p></div></div>
   <div class="quick3">
     <button class="quick-btn primary" onclick="createList()">+ Buat<br>Senarai</button>
-    <button class="quick-btn" onclick="uploadReceipt()">📷<br>Upload Resit</button>
+    <button class="quick-btn" onclick="showPage('receipts',[...document.querySelectorAll('.tab')].find(b=>b.textContent.includes('History')))" >📜<br>Sejarah</button>
     <button class="quick-btn" onclick="openSettingsItems()">🥬<br>Master Barang</button>
   </div>
 </div>
@@ -530,11 +552,11 @@ ${activeLists.length?activeLists.map((l,idx)=>{const p=pctOf(l);const d=doneOf(l
   <div class="alert-grid">
     <div><b>${unavailable}</b><span class="mini">barang tiada</span></div>
     <div><b>${replaced}</b><span class="mini">barang diganti</span></div>
-    <div><b>${db.receipts.filter(r=>r.familyId===session.familyId&&r.claimStatus==='unpaid').length}</b><span class="mini">claim belum selesai</span></div>
+    <div><b>${completedLists.length}</b><span class="mini">tugasan selesai</span></div>
   </div>
 </div>
 <div class="card weekly-card">
-  <div class="between"><div><h3 style="margin:0">Belanja Mingguan</h3><p class="muted">${fDate(monday)} – ${fDate(sunday)}</p></div><span class="pill green">${weeklyReceipts.length} resit</span></div>
+  <div class="between"><div><h3 style="margin:0">Belanja Mingguan</h3><p class="muted">${fDate(monday)} – ${fDate(sunday)}</p></div><span class="pill green">${weeklyCompleted.length} tugasan</span></div>
   <div class="weekly-amount">RM ${weeklyTotal.toFixed(2)}</div>
   <p class="muted">Jumlah perbelanjaan minggu ini</p>
   <div class="smart-chart">
@@ -546,11 +568,11 @@ ${activeLists.length?activeLists.map((l,idx)=>{const p=pctOf(l);const d=doneOf(l
     </svg>
     <div class="chart-labels"><span>Isn</span><span>Sel</span><span>Rab</span><span>Kha</span><span>Jum</span><span>Sab</span><span>Aha</span></div>
   </div>
-  <div class="chart-summary"><div class="box"><span class="mini">Resit disimpan</span><b>${weeklyReceipts.length}</b></div><div class="box"><span class="mini">Claim belum bayar</span><b style="color:#15803d">RM${totalClaim.toFixed(2)}</b></div></div>
+  <div class="chart-summary"><div class="box"><span class="mini">Belanja bulan ini</span><b>RM${monthlyTotal.toFixed(2)}</b></div><div class="box"><span class="mini">Jumlah family</span><b style="color:#15803d">RM${familyTotal.toFixed(2)}</b></div></div>
 </div>
 <div class="between" style="margin:16px 0 8px"><h3 style="margin:0">Barang Kerap Dibeli</h3><span class="mini">Lihat semua ›</span></div>
 <div class="freq-row"><div class="freq-chip"><span>🥚</span>Telur</div><div class="freq-chip"><span>🍗</span>Ayam</div><div class="freq-chip"><span>🧅</span>Bawang</div><div class="freq-chip"><span>🥛</span>Susu</div><div class="freq-chip"><span>🍚</span>Beras</div></div>
-<div class="card"><h3 style="margin-top:0">Aktiviti Terkini</h3><div class="activity-line"><span>Isteri upload resit</span><span class="mini">10:28</span></div><div class="activity-line"><span>Ayam ditanda dah beli</span><span class="mini">10:15</span></div><div class="activity-line"><span>Kicap diganti dengan jenama lain</span><span class="mini">09:47</span></div></div>`}
+<div class="card"><h3 style="margin-top:0">Aktiviti Terkini</h3>${completedLists.slice().sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0)).slice(0,3).map(l=>`<div class="activity-line"><span>${(db.profiles.find(p=>p.id===l.assignedToProfileId)?.name||'-')} selesai ${l.title}</span><span class="mini">RM${Number(l.totalAmount||0).toFixed(2)}</span></div>`).join('')||'<p class="muted">Belum ada aktiviti selesai.</p>'}</div>`}
 function familyHtml(){
   const f=accountFamily(); const profiles=familyProfiles(); const slots=5-profiles.length;
   return `<div class="settings-group"><div class="settings-head"><h3>Family Account</h3><p>1 username = 1 family. Profil keluarga dipilih selepas login.</p></div><div style="padding:14px"><div class="limit-note">Profil aktif: ${profiles.length}/5</div><div class="between item"><div><h4>${f.name}</h4><p>Akaun family: ${user().username}</p></div><button class="btn small ghost" onclick="switchProfile()">Tukar Profil</button></div></div></div>
@@ -616,7 +638,7 @@ function renderLists(){
     if(r.status==='unavailable') extra=`<div class="notice" style="margin-top:8px;background:#fff7ed;border-color:#fed7aa;color:#9a3412"><b>Tiada:</b> ${r.unavailableReason||'-'}<br><span>${r.unavailableNote||''}</span></div>`;
     return extra;
   };
-  const receiverCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">${nameOf(l.createdByProfileId)} minta anda beli</p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><div>${l.status==='sent'?`<button class="btn small blue" onclick="acceptTask('${l.id}')">Terima</button>`:''}<button class="btn small" onclick="completeList('${l.id}')">Selesai</button></div></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">Progress: ${progress(l)}% • ${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}<div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
+  const receiverCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">${nameOf(l.createdByProfileId)} minta anda beli</p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><div>${l.status==='sent'?`<button class="btn small blue" onclick="acceptTask('${l.id}')">Terima</button>`:''}${progress(l)===100&&l.status!=='sent'?`<button class="btn small" onclick="completeList('${l.id}')">Selesai</button>`:''}</div></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">Progress: ${progress(l)}% • ${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p><div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}<div style="margin-top:8px"><button class="btn small" onclick="setStatus('${l.id}','${r.id}','bought')">Dah Beli</button> <button class="btn small red" onclick="setStatus('${l.id}','${r.id}','unavailable')">Tiada</button> <button class="btn small amber" onclick="setStatus('${l.id}','${r.id}','replaced')">Ganti</button></div></div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
   const senderCard=l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">Dihantar kepada: <b>${nameOf(l.assignedToProfileId)}</b></p><span class="pill ${l.status==='completed'?'green':l.status==='sent'?'amber':'blue'}">${statusLabel[l.status]||l.status}</span></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div><p class="mini">${(l.items||[]).filter(itemDone).length}/${(l.items||[]).length} barang selesai</p>${l.status==='draft'?`<div class="category">Tambah barang</div><select onchange="if(this.value)addToList('${l.id}',this.value);this.value=''"><option value="">Pilih barang...</option>${activeItems.map(i=>`<option value="${i.id}">${i.category} - ${i.name}</option>`).join('')}</select><button class="btn small blue" style="margin-top:10px" onclick="sendList('${l.id}')">Hantar</button>`:''}<div class="category">Barang diminta</div>${(l.items||[]).map(r=>`<div class="item"><div><h4>${r.name}</h4><p>${r.unit} • ${r.status}</p>${itemDetails(r)}</div></div>`).join('')||'<p class="muted">Belum tambah barang.</p>'}</div>`;
   const progressCard=l=>`<div class="card"><div class="between"><div><b>${l.title}</b><p class="muted">${nameOf(l.createdByProfileId)} → ${nameOf(l.assignedToProfileId)}</p></div><b>${progress(l)}%</b></div><div class="progress"><span style="width:${progress(l)}%"></span></div></div>`;
   const activityLine=l=>`<div class="activity-line"><span>${nameOf(l.createdByProfileId)} hantar senarai kepada ${nameOf(l.assignedToProfileId)}: <b>${l.title}</b></span><span>${statusLabel[l.status]||l.status}</span></div>`;
@@ -635,22 +657,19 @@ async function acceptTask(id){
   l.status='accepted';save();renderLists();renderHome();
 }
 function renderReceipts(){
-  const rec=db.receipts.filter(r=>r.familyId===session.familyId).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const used=storageUsage();
-  const pct=Math.min(100,Math.round((used/(50*1024*1024))*100));
-  receipts.innerHTML=`<div class="receipt"><b>Upload Resit</b><p class="muted">Gambar resit akan disimpan di Supabase Storage bucket <b>receipts</b>. Demo local ini simpan preview dalam browser.</p><button class="btn blue" onclick="uploadReceipt()">+ Ambil/Upload Resit</button><button class="btn ghost" style="margin-left:8px" onclick="exportReceipts()">Export Rekod</button></div>
-  <div class="card"><div class="between"><div><h3 style="margin:0">Storage Resit</h3><p class="muted">Cadangan limit: 50MB setiap family</p></div><b>${fmtBytes(used)} / 50MB</b></div><div class="storage-meter"><span style="width:${pct}%"></span></div><div class="download-note">Setiap resit boleh dibuka, download semula, share atau delete.</div></div>
-  ${rec.map(r=>`<div class="card receipt-card"><div class="between"><div><h3 class="list-title">${r.storeName||'Resit'} • RM${Number(r.amount).toFixed(2)}</h3><p class="muted">${new Date(r.date).toLocaleDateString('ms-MY')} • dibayar oleh ${db.users.find(u=>u.id===r.payer)?.username||'-'}</p></div><span class="pill ${r.claimStatus==='paid'?'green':'amber'}">${r.claimStatus==='paid'?'Selesai':'Belum Claim'}</span></div>
-    <div class="receipt-preview">${r.fileData&&String(r.fileData).startsWith('data:image')?`<img src="${r.fileData}" alt="Resit">`:'<div class="empty">🧾</div>'}</div>
-    <div class="receipt-meta"><div class="meta-box"><span class="mini">Fail</span><b>${r.fileName||'receipt.jpg'}</b></div><div class="meta-box"><span class="mini">Saiz</span><b>${fmtBytes(r.fileSize||0)}</b></div></div>
-    <p class="muted" style="word-break:break-all">Storage path: ${r.storagePath||'receipts/family_id/yyyy/mm/receipt.jpg'}</p>
-    <div class="receipt-actions"><button class="btn small ghost" onclick="downloadReceipt('${r.id}')">⬇️ Download</button><button class="btn small ghost" onclick="shareReceipt('${r.id}')">📤 Share</button>${r.claimStatus==='unpaid'?`<button class="btn small" onclick="markPaid('${r.id}')">Paid</button>`:'<button class="btn small secondary">Paid</button>'}<button class="btn small red" onclick="deleteReceipt('${r.id}')">Delete</button></div></div>`).join('')||'<div class="card"><p class="muted">Belum ada resit.</p></div>'}`
+  const nameOf=id=>db.profiles.find(p=>p.id===id)?.name||'-';
+  const completed=db.lists.filter(l=>l.familyId===session.familyId&&l.status==='completed').sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
+  const total=completed.reduce((s,l)=>s+Number(l.totalAmount||0),0);
+  const items=completed.reduce((s,l)=>s+(l.items||[]).length,0);
+  receipts.innerHTML=`<div class="card"><div class="between"><div><h3 style="margin:0">Sejarah Belanja</h3><p class="muted">Tugasan yang sudah complete disimpan sebagai rekod.</p></div><span class="pill green">${completed.length} selesai</span></div></div>
+  <div class="grid2"><div class="kpi"><span class="mini">Jumlah belanja</span><br><b>RM${total.toFixed(2)}</b></div><div class="kpi"><span class="mini">Jumlah barang</span><br><b>${items}</b></div></div>
+  ${completed.map(l=>`<div class="card"><div class="between"><div><h3 class="list-title">${l.title}</h3><p class="muted">${nameOf(l.createdByProfileId)} → ${nameOf(l.assignedToProfileId)}</p></div><b style="color:#15803d">RM${Number(l.totalAmount||0).toFixed(2)}</b></div><p class="mini">${(l.items||[]).length} barang • ${l.completedAt?new Date(l.completedAt).toLocaleString('ms-MY'):'-'}</p>${l.completionNote?`<div class="notice" style="margin-top:8px">Nota: ${l.completionNote}</div>`:''}<div class="category">Barang</div>${(l.items||[]).map(i=>`<div class="item"><div><h4>${i.name}</h4><p>${i.unit} • ${i.status}</p></div></div>`).join('')}</div>`).join('')||'<div class="card"><p class="muted">Belum ada tugasan selesai.</p></div>'}`
 }
 
 boot();
 </script>
 <script>
-  const APP_VERSION = '1.3.15';
+  const APP_VERSION = '1.3.18';
   async function registerGrocery2UServiceWorker(){
     if(!('serviceWorker' in navigator)) return;
     try{
